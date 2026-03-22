@@ -1,0 +1,69 @@
+# Edge case tests
+{
+	# --- Semicolon/comma omission ---
+	# Last entry semicolon omitted
+	only-one = "no semicolon";
+
+	# --- Empty structures ---
+	empty-dict = {};
+	empty-list = [];
+
+	# --- Single elements ---
+	single-list = [42];
+	single-dict = { key = "val" };
+
+	# --- All value types ---
+	v-null = null;
+	v-true = true;
+	v-false = false;
+	v-int = 42;
+	v-float = 3.14;
+	v-string = "hello";
+	v-list = [1, 2, 3];
+	v-dict = { a = 1 };
+	v-utcts = UtcTs("2026-01-01 00:00:00");
+
+	# --- Quoted keys ---
+	"quoted-key" = "value";
+	'single-quoted-key' = "value";
+	"key with spaces" = "value";
+	"key=with=equals" = "value";
+	"key;with;semicolons" = "value";
+	"key{with}braces" = "value";
+	"key[with]brackets" = "value";
+
+	# --- BareKey boundary cases ---
+	a = 1;
+	Z = 2;
+	_ = 3;
+	a1 = 4;
+	A_B = 5;
+	my-key = 6;
+	a-b-c = 7;
+	UPPER_CASE = 8;
+	mixedCase123 = 9;
+	_leading-underscore = 10;
+
+	# --- Whitespace flexibility ---
+	no-spaces="compact";
+	lots-of-spaces    =    "wide";
+
+	# --- Trailing comma in lists ---
+	trailing-comma-list = [1, 2, 3,];
+	no-trailing-comma = [1, 2, 3];
+
+	# --- Trailing semicolon in dicts ---
+	trailing-semi-dict = { a = 1; b = 2; };
+	no-trailing-semi = { a = 1; b = 2 };
+
+	# --- null / true / false as quoted keys ---
+	"null" = "not a null";
+	"true" = "not a boolean";
+	"false" = "also not a boolean";
+
+	# --- Nested list-of-dicts edge case ---
+	nested-edge = [
+		{ x = 1 },
+		{ y = 2 }
+	]
+}

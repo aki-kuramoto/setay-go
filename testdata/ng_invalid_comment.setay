@@ -1,0 +1,6 @@
+# NG: Character after '#' is not space, tab, hash, exclamation, or '{'
+# This is a valid comment
+{
+	#thisIsNotAComment (hash followed directly by text)
+	name = "John"
+}

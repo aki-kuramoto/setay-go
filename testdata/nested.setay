@@ -1,0 +1,66 @@
+# Deep nesting test
+{
+	level1 = {
+		level2 = {
+			level3 = {
+				level4 = {
+					value = "deeply nested"
+				}
+			}
+		}
+	};
+
+	# Dicts inside lists
+	users = [
+		{
+			name = "Alice";
+			age = 30;
+			tags = ["admin", "user"]
+		},
+		{
+			name = "Bob";
+			age = 25;
+			tags = ["user"];
+			address = {
+				city = "Tokyo";
+				zip = "100-0001"
+			}
+		}
+	];
+
+	# Lists inside dicts inside lists
+	matrix = [
+		[1, 2, 3],
+		[4, 5, 6],
+		[7, 8, 9]
+	];
+
+	# Mixed nesting
+	config = {
+		database = {
+			hosts = ["primary.db", "replica.db"];
+			ports = [5432, 5433];
+			options = {
+				timeout = 30;
+				retries = 3;
+				ssl = true
+			}
+		};
+		cache = {
+			enabled = true;
+			ttl = 3600;
+			backends = [
+				{
+					type = "redis";
+					host = "localhost";
+					port = 6379
+				},
+				{
+					type = "memcached";
+					host = "localhost";
+					port = 11211
+				}
+			]
+		}
+	}
+}

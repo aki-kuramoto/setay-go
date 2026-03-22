@@ -1,0 +1,33 @@
+# Test for UtcTs variations
+{
+	# --- Basic format (UTC) ---
+	basic = UtcTs("2026-01-15 09:30:00");
+	basic-sq = UtcTs('2026-01-15 09:30:00');
+
+	# --- With milliseconds ---
+	with-ms = UtcTs("2026-03-22 12:28:27.123");
+	with-ms-1 = UtcTs("2026-03-22 12:28:27.1");
+	with-ms-long = UtcTs("2026-03-22 12:28:27.123456789");
+
+	# --- Z suffix ---
+	with-z = UtcTs("2026-03-22 12:28:27Z");
+	with-z-ms = UtcTs("2026-03-22 12:28:27.999Z");
+
+	# --- T separator ---
+	with-t = UtcTs("2026-03-22T12:28:27");
+	with-t-z = UtcTs("2026-03-22T12:28:27Z");
+	with-t-ms = UtcTs("2026-03-22T12:28:27.500");
+
+	# --- Timezone offset ---
+	plus-offset = UtcTs("2026-03-22 21:28:27+09:00");
+	minus-offset = UtcTs("2026-03-22 04:28:27-08:00");
+	zero-offset = UtcTs("2026-03-22 12:28:27+00:00");
+
+	# --- Single-quoted variants ---
+	sq-basic = UtcTs('2026-12-25 00:00:00');
+	sq-tz = UtcTs('2026-03-22T21:28:27+09:00');
+
+	# --- Boundary datetimes ---
+	midnight = UtcTs("2026-01-01 00:00:00");
+	end-of-day = UtcTs("2026-12-31 23:59:59.999")
+}

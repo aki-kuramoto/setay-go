@@ -1,0 +1,44 @@
+## Comprehensive test for comment formats
+{
+	# Hash + space: single-line comment
+	a = 1;
+	#	Hash + tab: single-line comment
+	b = 2;
+	## Double hash: single-line comment
+	c = 3;
+	#! Shebang-style reserved expression
+	d = 4;
+
+	# End-of-line comments
+	e = 5; # This is an end-of-line comment
+	f = 6; ## This is also an end-of-line comment
+	g = 7; #	End-of-line comment with tab
+
+	# Multi-line comment (basic)
+	#{
+		This is a multi-line comment.
+		You can write as many lines as you want.
+	}#
+	h = 8;
+
+	# Multi-line comment with lone '}' inside
+	#{
+		} ← This is not a closing marker
+		}← No '#' follows, so this is not a closing marker either
+	}#
+	i = 9;
+
+	# Empty multi-line comment
+	#{}#
+	j = 10;
+
+	# Consecutive comments
+	# Comment 1
+	## Comment 2
+	#! Comment 3
+	# Comment 4
+	k = 11;
+
+	# Comment between values
+	l = #{inline}# 12
+}

@@ -1,0 +1,4 @@
+# NG: BareKey starts with a hyphen ([0-9-] not allowed at the start)
+{
+	-invalid-key = "bad"
+}

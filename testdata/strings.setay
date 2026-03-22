@@ -1,0 +1,51 @@
+# Comprehensive test for string types and escape sequences
+{
+	# --- Basic strings ---
+	dq-simple = "hello world";
+	sq-simple = 'hello world';
+	dq-empty = "";
+	sq-empty = '';
+
+	# --- Cross-quote usage ---
+	dq-with-sq = "Rock'n' roll";
+	sq-with-dq = 'He said "hello"';
+
+	# --- Escape characters ---
+	tab = "before\tafter";
+	newline = "line1\nline2";
+	cr = "line1\rline2";
+	nul = "nul\0char";
+	backslash = "path\\to\\file";
+	dq-escape = "say \"hello\"";
+	sq-escape = 'it\'s fine';
+
+	# --- \xXX escape ---
+	hex-a = "\x41";
+	hex-z = "\x5A";
+	hex-zero = "\x00";
+	hex-max = "\x7F";
+
+	# --- \uXXXX escape ---
+	unicode-a = "\u0041";
+	unicode-jp = "\u3042";
+	unicode-zero = "\u0000";
+
+	# --- \UXXXXXXXX escape ---
+	unicode8-a = "\U00000041";
+	unicode8-emoji = "\U0001F600";
+
+	# --- Combined ---
+	mixed = "tab\there\nnewline\x41\u3042end";
+
+	# --- Multi-byte characters ---
+	japanese = "こんにちは世界";
+	emoji = "🎉🎊✨";
+	mixed-lang = "Hello, 世界! مرحبا";
+
+	# --- Escape sequences in single-quoted strings ---
+	sq-tab = 'tab\there';
+	sq-newline = 'line1\nline2';
+	sq-backslash = 'path\\to';
+	sq-hex = '\x41\x42\x43';
+	sq-unicode = '\u0041\u0042'
+}

@@ -1,0 +1,54 @@
+# Comprehensive test for numeric types
+{
+	# --- Decimal integers ---
+	zero = 0;
+	one = 1;
+	large = 9999999;
+	negative = -42;
+	neg-one = -1;
+
+	# Leading zeros are interpreted as decimal
+	leading-zero = 007;
+	leading-zero-eight = 008;
+	leading-zero-neg = -007;
+
+	# --- Floating-point ---
+	pi = 3.14159;
+	neg-float = -0.5;
+	zero-point = 0.0;
+	small = 0.001;
+
+	# --- Exponential notation ---
+	sci-lower = 1.5e10;
+	sci-upper = 2.3E4;
+	sci-neg-exp = 1.0e-3;
+	sci-pos-exp = 1.0e+6;
+	sci-neg-val = -1e10;
+	sci-int-like = 5E2;
+
+	# --- Hexadecimal ---
+	hex-lower = 0xff;
+	hex-upper = 0XFF;
+	hex-mixed = 0xDeAdBeEf;
+	hex-single = 0x0;
+	hex-neg = -0xCAFE;
+
+	# --- Binary ---
+	bin-lower = 0b1010;
+	bin-upper = 0B110;
+	bin-all-zeros = 0b0000;
+	bin-all-ones = 0b1111;
+	bin-neg = -0b101;
+
+	# --- Octal ---
+	oct-lower = 0o77;
+	oct-upper = 0O755;
+	oct-single = 0o0;
+	oct-neg = -0o77;
+
+	# --- Decimal (0d prefix) ---
+	dec-pref-lower = 0d42;
+	dec-pref-upper = 0D100;
+	dec-pref-zero = 0d0;
+	dec-pref-neg = -0d99
+}

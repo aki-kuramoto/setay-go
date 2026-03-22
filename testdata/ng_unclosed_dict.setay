@@ -1,0 +1,3 @@
+# NG: Missing closing brace
+{
+	name = "John"

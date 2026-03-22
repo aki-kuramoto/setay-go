@@ -1,0 +1,4 @@
+# NG: Colon used as dict entry separator (should use '=')
+{
+	"you_are_a" : "stranger!!"
+}

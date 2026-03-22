@@ -1,0 +1,4 @@
+# NG: Missing closing bracket in list
+{
+	items = [1, 2, 3
+}

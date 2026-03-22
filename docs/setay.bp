@@ -1,0 +1,476 @@
+# Grammar definition for the setay format.
+# setay is a format designed primarily for saving and loading
+# structured data in text form.
+package setayparser;
+
+root-def SetayDocument
+{
+	_: SetaySpacing;
+	dict: SetayDict;
+	_trailingSemi: zero-or-one<SetayTrailingSemicolon>;
+	_: SetaySpacing;
+};
+
+# ======================================================================
+#  Values
+# ======================================================================
+
+def SetayValue
+{
+	_: SetayDict or SetayList
+	   or SetayUtcTs
+	   or SetayTrue or SetayFalse or SetayNull
+	   or SetayNumber
+	   or SetayString;
+};
+
+# --- Null / Boolean ---
+
+def SetayNull  { _: "null"; };
+def SetayTrue  { _: "true"; };
+def SetayFalse { _: "false"; };
+
+# ======================================================================
+#  Dict { ... }
+# ======================================================================
+
+def SetayDict
+{
+	_: '{';
+	_: SetaySpacing;
+	entries: zero-or-one<SetayDictEntries>;
+	_: SetaySpacing;
+	_: '}';
+};
+
+# Dict entries.
+# After the first entry, the pattern repeats as: semicolon + next entry.
+# The trailing semicolon is optional.
+def SetayDictEntries
+{
+	first: SetayDictEntry;
+	rest: zero-or-more<SetayDictEntrySep>;
+	_trailingSemi: zero-or-one<SetayTrailingSemicolon>;
+	_: SetaySpacing;
+};
+
+def SetayDictEntrySep
+{
+	_: SetaySpacing;
+	_: ';';
+	_: SetaySpacing;
+	entry: SetayDictEntry;
+};
+
+def SetayTrailingSemicolon
+{
+	_: SetaySpacing;
+	_: ';';
+};
+
+# A single dict entry: key = value
+def SetayDictEntry
+{
+	key: SetayDictKey;
+	_: SetaySpacing;
+	_: '=';
+	_: SetaySpacing;
+	value: SetayValue;
+};
+
+# Dict key: bare key or string.
+def SetayDictKey
+{
+	_: SetayBareKey or SetayString;
+};
+
+# ======================================================================
+#  Bare Key
+# ======================================================================
+
+# First char: [a-zA-Z_], middle: [a-zA-Z0-9_-], last: [a-zA-Z0-9_] (no hyphen).
+# A single-character key consists of just the first character.
+def SetayBareKey
+{
+	firstCh: SetayBareKeyLeadChar;
+	trailing: zero-or-one<SetayBareKeyTrailingPart>;
+};
+
+def SetayBareKeyTrailingPart
+{
+	midChars: zero-or-more<SetayBareKeyContinueChar>;
+	lastCh: SetayBareKeyTrailingChar;
+};
+
+# Characters allowed at the start: [a-zA-Z_]
+def SetayBareKeyLeadChar
+{
+	_: char-range<'a','z'> or char-range<'A','Z'> or '_';
+};
+
+# Characters allowed in the middle: [a-zA-Z0-9_-]
+def SetayBareKeyContinueChar
+{
+	_: char-range<'a','z'> or char-range<'A','Z'> or char-range<'0','9'> or '_' or '-';
+};
+
+# Characters allowed at the end: [a-zA-Z0-9_] (no hyphen)
+def SetayBareKeyTrailingChar
+{
+	_: char-range<'a','z'> or char-range<'A','Z'> or char-range<'0','9'> or '_';
+};
+
+# ======================================================================
+#  List [ ... ]
+# ======================================================================
+
+def SetayList
+{
+	_: '[';
+	_: SetaySpacing;
+	elements: zero-or-one<SetayListElements>;
+	_: SetaySpacing;
+	_: ']';
+};
+
+# List elements.
+# After the first element, the pattern repeats as: comma + next element.
+# The trailing comma is optional.
+def SetayListElements
+{
+	first: SetayValue;
+	rest: zero-or-more<SetayListElemSep>;
+	_trailingComma: zero-or-one<SetayTrailingComma>;
+	_: SetaySpacing;
+};
+
+def SetayListElemSep
+{
+	_: SetaySpacing;
+	_: ',';
+	_: SetaySpacing;
+	value: SetayValue;
+};
+
+def SetayTrailingComma
+{
+	_: SetaySpacing;
+	_: ',';
+};
+
+# ======================================================================
+#  Strings
+# ======================================================================
+
+def SetayString
+{
+	_: SetayDqString or SetaySqString;
+};
+
+# --- Double-quoted string "..." ---
+
+def SetayDqString
+{
+	_: '"';
+	content: zero-or-more<SetayDqStringContent>;
+	_: '"';
+};
+
+def SetayDqStringContent
+{
+	_: SetayEscapeSequence or SetayDqNormalChar;
+};
+
+# Any character except '"' and '\'.
+def SetayDqNormalChar
+{
+	_: anychar-except<'"' or '\\'>;
+};
+
+# --- Single-quoted string '...' ---
+
+def SetaySqString
+{
+	_: '\'';
+	content: zero-or-more<SetaySqStringContent>;
+	_: '\'';
+};
+
+def SetaySqStringContent
+{
+	_: SetayEscapeSequence or SetaySqNormalChar;
+};
+
+# Any character except '\'' and '\'.
+def SetaySqNormalChar
+{
+	_: anychar-except<'\'' or '\\'>;
+};
+
+# ======================================================================
+#  Escape Sequences
+# ======================================================================
+
+def SetayEscapeSequence
+{
+	_: '\\';
+	ch: SetayEscapeChar;
+};
+
+def SetayEscapeChar
+{
+	_: 't' or 'r' or 'n' or '0' or '\\' or '"' or '\''
+	   or SetayHexEscape or SetayUnicode4Escape or SetayUnicode8Escape;
+};
+
+# \xXX (0x00 - 0x7F)
+def SetayHexEscape
+{
+	_: 'x';
+	_: SetayHexDigit;
+	_: SetayHexDigit;
+};
+
+# \uXXXX
+def SetayUnicode4Escape
+{
+	_: 'u';
+	_: SetayHexDigit;
+	_: SetayHexDigit;
+	_: SetayHexDigit;
+	_: SetayHexDigit;
+};
+
+# \UXXXXXXXX
+def SetayUnicode8Escape
+{
+	_: 'U';
+	_: SetayHexDigit;
+	_: SetayHexDigit;
+	_: SetayHexDigit;
+	_: SetayHexDigit;
+	_: SetayHexDigit;
+	_: SetayHexDigit;
+	_: SetayHexDigit;
+	_: SetayHexDigit;
+};
+
+def SetayHexDigit
+{
+	_: char-range<'0','9'> or char-range<'a','f'> or char-range<'A','F'>;
+};
+
+# ======================================================================
+#  Numbers
+# ======================================================================
+
+# Numbers are tried in order: prefixed integer, float, decimal integer.
+# Floats contain '.' or 'e'/'E'.
+# Trying float before decimal integer ensures "4.11" is parsed correctly.
+def SetayNumber
+{
+	_: SetayPrefixedInt or SetayFloat or SetayDecInt;
+};
+
+# --- Decimal integer ---
+# Leading zeros are interpreted as decimal, not octal.
+def SetayDecInt
+{
+	sign: zero-or-one<'-'>;
+	digits: SetayDecDigit;
+	rest: zero-or-more<SetayDecDigit>;
+};
+
+def SetayDecDigit
+{
+	_: char-range<'0','9'>;
+};
+
+# --- Floating-point number ---
+def SetayFloat
+{
+	sign: zero-or-one<'-'>;
+	intPart: SetayDecDigit;
+	intRest: zero-or-more<SetayDecDigit>;
+	part: SetayFloatFrac or SetayFloatExp;
+};
+
+def SetayFloatFrac
+{
+	_: '.';
+	firstDigit: SetayDecDigit;
+	rest: zero-or-more<SetayDecDigit>;
+	exp: zero-or-one<SetayFloatExp>;
+};
+
+def SetayFloatExp
+{
+	_: 'e' or 'E';
+	sign: zero-or-one<'+' or '-'>;
+	firstDigit: SetayDecDigit;
+	rest: zero-or-more<SetayDecDigit>;
+};
+
+# --- Prefixed integers ---
+def SetayPrefixedInt
+{
+	_: SetayHexInt or SetayBinInt or SetayOctInt or SetayDecPrefixedInt;
+};
+
+# 0x / 0X: hexadecimal
+def SetayHexInt
+{
+	sign: zero-or-one<'-'>;
+	_: "0x" or "0X";
+	first: SetayHexDigit;
+	rest: zero-or-more<SetayHexDigit>;
+};
+
+# 0b / 0B: binary
+def SetayBinInt
+{
+	sign: zero-or-one<'-'>;
+	_: "0b" or "0B";
+	first: '0' or '1';
+	rest: zero-or-more<SetayBinDigit>;
+};
+
+def SetayBinDigit
+{
+	_: '0' or '1';
+};
+
+# 0o / 0O: octal
+def SetayOctInt
+{
+	sign: zero-or-one<'-'>;
+	_: "0o" or "0O";
+	first: char-range<'0','7'>;
+	rest: zero-or-more<SetayOctDigit>;
+};
+
+def SetayOctDigit
+{
+	_: char-range<'0','7'>;
+};
+
+# 0d / 0D: explicit decimal notation
+def SetayDecPrefixedInt
+{
+	sign: zero-or-one<'-'>;
+	_: "0d" or "0D";
+	first: SetayDecDigit;
+	rest: zero-or-more<SetayDecDigit>;
+};
+
+# ======================================================================
+#  UTC Timestamp
+# ======================================================================
+
+def SetayUtcTs
+{
+	_: "UtcTs";
+	_: '(';
+	_: SetaySpacing;
+	value: SetayString;
+	_: SetaySpacing;
+	_: ')';
+};
+
+# ======================================================================
+#  Comments
+# ======================================================================
+
+# setay supports the following comment types:
+#   1. "# " (hash + space): single-line comment
+#   2. "#\t" (hash + tab): single-line comment
+#   3. "##" (double hash): single-line comment
+#   4. "#!" (hash + exclamation): reserved expression (intended for shebang),
+#      ignored until end of line. While it behaves like a comment, it should
+#      not be used as a general-purpose comment.
+#   5. "#{" ~ "}#": multi-line comment (non-nesting)
+def SetayComment
+{
+	_: SetayMultiLineComment
+	   or SetayLineCommentHash
+	   or SetayLineCommentSpace
+	   or SetayLineCommentTab
+	   or SetayLineCommentShebang;
+};
+
+# "# " (hash + space) single-line comment
+def SetayLineCommentSpace
+{
+	_: "# ";
+	_: zero-or-more<SetayLineCommentChar>;
+};
+
+# "#\t" (hash + tab) single-line comment
+def SetayLineCommentTab
+{
+	_: "#\t";
+	_: zero-or-more<SetayLineCommentChar>;
+};
+
+# "##" (double hash) single-line comment
+def SetayLineCommentHash
+{
+	_: "##";
+	_: zero-or-more<SetayLineCommentChar>;
+};
+
+# "#!" (hash + exclamation) reserved expression (shebang, etc.)
+def SetayLineCommentShebang
+{
+	_: "#!";
+	_: zero-or-more<SetayLineCommentChar>;
+};
+
+# Single-line comment body character (everything except newline)
+def SetayLineCommentChar
+{
+	_: anychar-except<'\n' or '\r'>;
+};
+
+# "#{" ~ "}#" multi-line comment (non-nesting)
+def SetayMultiLineComment
+{
+	_: "#{";
+	content: zero-or-more<SetayMultiLineCommentContent>;
+	_: "}#";
+};
+
+# Characters inside a multi-line comment.
+# To prevent premature closing, '}' is only allowed when not followed by '#'.
+def SetayMultiLineCommentContent
+{
+	_: SetayMultiLineCommentBrace or SetayMultiLineCommentNormalChar;
+};
+
+# '}' alone (only when not followed by '#')
+def SetayMultiLineCommentBrace
+{
+	_: '}';
+	_: not-followed-by<'#'>;
+};
+
+# Any character except '}'
+def SetayMultiLineCommentNormalChar
+{
+	_: anychar-except<'}'>;
+};
+
+# ======================================================================
+#  Whitespace / Newlines
+# ======================================================================
+
+# setay spacing: skips spaces, tabs, newlines, BOM, and comments.
+def SetaySpacing
+{
+	_: zero-or-more<SetaySpacingItem>;
+};
+
+def SetaySpacingItem
+{
+	_: ' ' or '\t' or "\r\n" or '\n' or '\r' or '\uFEFF' or SetayComment;
+};

@@ -1,0 +1,4 @@
+# NG: Semicolons in list (should be commas)
+{
+	items = [1; 2; 3]
+}

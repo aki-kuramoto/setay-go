@@ -1,0 +1,4 @@
+# NG: JSON-style colon separator (should use '=')
+{
+	"name": "John"
+}

@@ -1,0 +1,583 @@
+package setay
+
+import (
+	"fmt"
+	"os"
+	"reflect"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// Unmarshal parses setay-encoded data and stores the result in the value pointed to by v.
+func Unmarshal(data []byte, v interface{}) error {
+	rv := reflect.ValueOf(v)
+	if rv.Kind() != reflect.Ptr || rv.IsNil() {
+		return fmt.Errorf("setay: Unmarshal requires a non-nil pointer")
+	}
+
+	source := string(data)
+	doc, err := Parse(source)
+	if err != nil {
+		return fmt.Errorf("setay: %w", err)
+	}
+
+	// Verify all input consumed
+	runes := []rune(source)
+	start := int(doc.Authority.StartedAt)
+	length := int(doc.Authority.Length)
+	if start+length != len(runes) {
+		return fmt.Errorf("setay: parse incomplete (consumed %d of %d characters)", start+length, len(runes))
+	}
+
+	u := &unmarshaler{source: runes}
+	return u.unmarshalDict(doc.Dict, rv.Elem())
+}
+
+// UnmarshalFile reads a setay file and parses it into v.
+func UnmarshalFile(filename string, v interface{}) error {
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return err
+	}
+	return Unmarshal(data, v)
+}
+
+type unmarshaler struct {
+	source []rune
+}
+
+// textOf extracts the source text for a node.
+func (u *unmarshaler) textOf(auth *Authority) string {
+	start := int(auth.StartedAt)
+	end := start + int(auth.Length)
+	if end > len(u.source) {
+		end = len(u.source)
+	}
+	return string(u.source[start:end])
+}
+
+// unmarshalDict populates a struct or map from a SetayDict node.
+func (u *unmarshaler) unmarshalDict(dict *DefSetayDict, target reflect.Value) error {
+	// Unwrap pointer
+	for target.Kind() == reflect.Ptr {
+		if target.IsNil() {
+			target.Set(reflect.New(target.Type().Elem()))
+		}
+		target = target.Elem()
+	}
+
+	if target.Kind() == reflect.Map {
+		return u.unmarshalDictToMap(dict, target)
+	}
+	if target.Kind() == reflect.Struct {
+		return u.unmarshalDictToStruct(dict, target)
+	}
+	// Also support map[string]interface{} via interface{}
+	if target.Kind() == reflect.Interface {
+		m := make(map[string]interface{})
+		mapVal := reflect.ValueOf(m)
+		if err := u.unmarshalDictToMap(dict, mapVal); err != nil {
+			return err
+		}
+		target.Set(mapVal)
+		return nil
+	}
+
+	return fmt.Errorf("setay: cannot unmarshal dict into %s", target.Type())
+}
+
+func (u *unmarshaler) unmarshalDictToStruct(dict *DefSetayDict, target reflect.Value) error {
+	if len(dict.Entries) == 0 {
+		return nil
+	}
+
+	entries := dict.Entries[0]
+	fieldMap := buildFieldMap(target.Type())
+
+	// Process first entry
+	if err := u.setStructField(entries.First, target, fieldMap); err != nil {
+		return err
+	}
+	// Process rest
+	for _, sep := range entries.Rest {
+		if err := u.setStructField(sep.Entry, target, fieldMap); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (u *unmarshaler) unmarshalDictToMap(dict *DefSetayDict, target reflect.Value) error {
+	if target.IsNil() {
+		target.Set(reflect.MakeMap(target.Type()))
+	}
+
+	if len(dict.Entries) == 0 {
+		return nil
+	}
+
+	entries := dict.Entries[0]
+	valType := target.Type().Elem()
+
+	if err := u.setMapEntry(entries.First, target, valType); err != nil {
+		return err
+	}
+	for _, sep := range entries.Rest {
+		if err := u.setMapEntry(sep.Entry, target, valType); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// buildFieldMap creates a mapping from setay key name → struct field index.
+func buildFieldMap(t reflect.Type) map[string]int {
+	m := make(map[string]int)
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		if !field.IsExported() {
+			continue
+		}
+		opts := parseTag(field)
+		if opts.skip {
+			continue
+		}
+		m[opts.name] = i
+		// Also map lowercase field name for case-insensitive fallback
+		lower := strings.ToLower(field.Name)
+		if _, exists := m[lower]; !exists {
+			m[lower] = i
+		}
+	}
+	return m
+}
+
+func (u *unmarshaler) setStructField(entry *DefSetayDictEntry, target reflect.Value, fieldMap map[string]int) error {
+	keyText := u.extractKeyText(entry.Key)
+
+	idx, ok := fieldMap[keyText]
+	if !ok {
+		// Try case-insensitive
+		idx, ok = fieldMap[strings.ToLower(keyText)]
+	}
+	if !ok {
+		// Unknown field — skip silently (like encoding/json)
+		return nil
+	}
+
+	fieldVal := target.Field(idx)
+	return u.unmarshalValue(entry.Value, fieldVal)
+}
+
+func (u *unmarshaler) setMapEntry(entry *DefSetayDictEntry, target reflect.Value, valType reflect.Type) error {
+	keyText := u.extractKeyText(entry.Key)
+
+	val := reflect.New(valType).Elem()
+	if err := u.unmarshalValue(entry.Value, val); err != nil {
+		return err
+	}
+	target.SetMapIndex(reflect.ValueOf(keyText), val)
+	return nil
+}
+
+// extractKeyText gets the key as a plain string.
+func (u *unmarshaler) extractKeyText(key *DefSetayDictKey) string {
+	inner := key.AnonymousField1
+	switch v := inner.(type) {
+	case *DefSetayBareKey:
+		return u.textOf(v.GetAuthority())
+	case *DefSetayString:
+		return u.decodeString(v)
+	default:
+		return u.textOf(key.GetAuthority())
+	}
+}
+
+// unmarshalValue converts a SetayValue node into a Go reflect.Value.
+func (u *unmarshaler) unmarshalValue(val *DefSetayValue, target reflect.Value) error {
+	// Unwrap pointer: allocate if nil
+	for target.Kind() == reflect.Ptr {
+		if target.IsNil() {
+			target.Set(reflect.New(target.Type().Elem()))
+		}
+		target = target.Elem()
+	}
+
+	inner := val.AnonymousField1
+
+	switch v := inner.(type) {
+	case *DefSetayNull:
+		return u.setNull(target)
+	case *DefSetayTrue:
+		return u.setBool(target, true)
+	case *DefSetayFalse:
+		return u.setBool(target, false)
+	case *DefSetayString:
+		s := u.decodeString(v)
+		return u.setString(target, s)
+	case *DefSetayNumber:
+		numText := u.textOf(v.GetAuthority())
+		return u.setNumber(target, numText)
+	case *DefSetayDict:
+		return u.unmarshalDict(v, target)
+	case *DefSetayList:
+		return u.unmarshalList(v, target)
+	case *DefSetayUtcTs:
+		return u.setUtcTs(v, target)
+	default:
+		return fmt.Errorf("setay: unsupported value type")
+	}
+}
+
+func (u *unmarshaler) setNull(target reflect.Value) error {
+	switch target.Kind() {
+	case reflect.Ptr, reflect.Interface, reflect.Slice, reflect.Map:
+		target.Set(reflect.Zero(target.Type()))
+	default:
+		target.Set(reflect.Zero(target.Type()))
+	}
+	return nil
+}
+
+func (u *unmarshaler) setBool(target reflect.Value, b bool) error {
+	switch target.Kind() {
+	case reflect.Bool:
+		target.SetBool(b)
+	case reflect.Interface:
+		target.Set(reflect.ValueOf(b))
+	default:
+		return fmt.Errorf("setay: cannot set bool into %s", target.Type())
+	}
+	return nil
+}
+
+func (u *unmarshaler) setString(target reflect.Value, s string) error {
+	switch target.Kind() {
+	case reflect.String:
+		target.SetString(s)
+	case reflect.Interface:
+		target.Set(reflect.ValueOf(s))
+	default:
+		return fmt.Errorf("setay: cannot set string into %s", target.Type())
+	}
+	return nil
+}
+
+func (u *unmarshaler) setNumber(target reflect.Value, text string) error {
+	text = strings.TrimSpace(text)
+
+	switch target.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		n, err := parseInteger(text)
+		if err != nil {
+			return fmt.Errorf("setay: %w", err)
+		}
+		target.SetInt(n)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		n, err := parseInteger(text)
+		if err != nil {
+			return fmt.Errorf("setay: %w", err)
+		}
+		target.SetUint(uint64(n))
+	case reflect.Float32, reflect.Float64:
+		f, err := parseFloat(text)
+		if err != nil {
+			return fmt.Errorf("setay: %w", err)
+		}
+		target.SetFloat(f)
+	case reflect.Interface:
+		// Determine type: if contains '.', 'e', 'E' → float, else int
+		if strings.ContainsAny(text, ".eE") {
+			f, err := parseFloat(text)
+			if err != nil {
+				return fmt.Errorf("setay: %w", err)
+			}
+			target.Set(reflect.ValueOf(f))
+		} else {
+			n, err := parseInteger(text)
+			if err != nil {
+				return fmt.Errorf("setay: %w", err)
+			}
+			target.Set(reflect.ValueOf(n))
+		}
+	default:
+		return fmt.Errorf("setay: cannot set number into %s", target.Type())
+	}
+	return nil
+}
+
+func (u *unmarshaler) unmarshalList(list *DefSetayList, target reflect.Value) error {
+	if target.Kind() == reflect.Interface {
+		// Decode into []interface{}
+		var result []interface{}
+		if len(list.Elements) > 0 {
+			elements := list.Elements[0]
+			values := collectValues(elements)
+			result = make([]interface{}, len(values))
+			for i, val := range values {
+				var elem interface{}
+				elemVal := reflect.ValueOf(&elem).Elem()
+				if err := u.unmarshalValue(val, elemVal); err != nil {
+					return err
+				}
+				result[i] = elem
+			}
+		}
+		target.Set(reflect.ValueOf(result))
+		return nil
+	}
+
+	if target.Kind() != reflect.Slice {
+		return fmt.Errorf("setay: cannot unmarshal list into %s", target.Type())
+	}
+
+	if len(list.Elements) == 0 {
+		target.Set(reflect.MakeSlice(target.Type(), 0, 0))
+		return nil
+	}
+
+	elements := list.Elements[0]
+	values := collectValues(elements)
+	slice := reflect.MakeSlice(target.Type(), len(values), len(values))
+	for i, val := range values {
+		if err := u.unmarshalValue(val, slice.Index(i)); err != nil {
+			return err
+		}
+	}
+	target.Set(slice)
+	return nil
+}
+
+func (u *unmarshaler) setUtcTs(utcts *DefSetayUtcTs, target reflect.Value) error {
+	// Extract the string value inside UtcTs(...)
+	s := u.decodeString(utcts.Value)
+
+	// Try parsing various time formats
+	formats := []string{
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04:05",
+		"2006-01-02 15:04:05Z",
+		"2006-01-02T15:04:05Z",
+		"2006-01-02 15:04:05.999999999",
+		"2006-01-02T15:04:05.999999999",
+		"2006-01-02 15:04:05.999999999Z",
+		"2006-01-02T15:04:05.999999999Z",
+		"2006-01-02 15:04:05-07:00",
+		"2006-01-02T15:04:05-07:00",
+		"2006-01-02 15:04:05.999999999-07:00",
+		"2006-01-02T15:04:05.999999999-07:00",
+		"2006-01-02 15:04:05+07:00",
+		"2006-01-02T15:04:05+07:00",
+	}
+
+	var t time.Time
+	var parseErr error
+	for _, format := range formats {
+		t, parseErr = time.Parse(format, s)
+		if parseErr == nil {
+			break
+		}
+	}
+	if parseErr != nil {
+		return fmt.Errorf("setay: cannot parse UtcTs %q: %w", s, parseErr)
+	}
+
+	if target.Kind() == reflect.Interface {
+		target.Set(reflect.ValueOf(t))
+		return nil
+	}
+	if target.Type() == reflect.TypeOf(time.Time{}) {
+		target.Set(reflect.ValueOf(t))
+		return nil
+	}
+	if target.Kind() == reflect.String {
+		target.SetString(s)
+		return nil
+	}
+
+	// Check for wantai timestamp types (types implementing ToTime() time.Time).
+	// Wantai types are named types backed by integer primitives (int64, int32, uint32).
+	// We convert time.Time to the appropriate integer representation based on the type name.
+	toTimerType := reflect.TypeOf((*toTimer)(nil)).Elem()
+	if reflect.PointerTo(target.Type()).Implements(toTimerType) || target.Type().Implements(toTimerType) {
+		return u.setWantaiTs(t, target)
+	}
+
+	return fmt.Errorf("setay: cannot set UtcTs into %s", target.Type())
+}
+
+// setWantaiTs converts a time.Time to a wantai timestamp type and sets it on target.
+// The conversion is based on the type name to determine the appropriate precision.
+func (u *unmarshaler) setWantaiTs(t time.Time, target reflect.Value) error {
+	typeName := target.Type().Name()
+	tUTC := t.UTC()
+
+	var intVal int64
+	switch typeName {
+	case "UtcNanoTs":
+		intVal = tUTC.UnixNano()
+	case "UtcMicroTs":
+		intVal = tUTC.UnixMicro()
+	case "UtcMilliTs":
+		intVal = tUTC.UnixMilli()
+	case "UtcSecTsS32", "UtcSecTsU32", "UtcSecTsS32Ep2k", "UtcSecTsU32Ep2k":
+		unixSec := tUTC.Unix()
+		if typeName == "UtcSecTsS32Ep2k" || typeName == "UtcSecTsU32Ep2k" {
+			// Epoch 2000: subtract seconds between 1970-01-01 and 2000-01-01
+			const epoch2k = 946684800 // 2000-01-01T00:00:00Z in Unix seconds
+			unixSec -= epoch2k
+		}
+		intVal = unixSec
+	default:
+		// Fallback: try seconds-level precision
+		intVal = tUTC.Unix()
+	}
+
+	switch target.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		target.SetInt(intVal)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		target.SetUint(uint64(intVal))
+	default:
+		return fmt.Errorf("setay: cannot set UtcTs into wantai type %s (kind %s)", target.Type(), target.Kind())
+	}
+	return nil
+}
+
+// decodeString extracts the unescaped string content from a SetayString node.
+func (u *unmarshaler) decodeString(str *DefSetayString) string {
+	inner := str.AnonymousField1
+	switch v := inner.(type) {
+	case *DefSetayDqString:
+		return u.decodeStringContent(v.Content)
+	case *DefSetaySqString:
+		return u.decodeSqStringContent(v.Content)
+	default:
+		// Fallback: strip quotes from raw text
+		raw := u.textOf(str.GetAuthority())
+		if len(raw) >= 2 {
+			return raw[1 : len(raw)-1]
+		}
+		return raw
+	}
+}
+
+func (u *unmarshaler) decodeStringContent(contents []*DefSetayDqStringContent) string {
+	var sb strings.Builder
+	for _, c := range contents {
+		inner := c.AnonymousField1
+		switch v := inner.(type) {
+		case *DefSetayEscapeSequence:
+			sb.WriteString(u.decodeEscape(v))
+		case *DefSetayDqNormalChar:
+			sb.WriteString(u.textOf(v.GetAuthority()))
+		default:
+			sb.WriteString(u.textOf(c.GetAuthority()))
+		}
+	}
+	return sb.String()
+}
+
+func (u *unmarshaler) decodeSqStringContent(contents []*DefSetaySqStringContent) string {
+	var sb strings.Builder
+	for _, c := range contents {
+		inner := c.AnonymousField1
+		switch v := inner.(type) {
+		case *DefSetayEscapeSequence:
+			sb.WriteString(u.decodeEscape(v))
+		case *DefSetaySqNormalChar:
+			sb.WriteString(u.textOf(v.GetAuthority()))
+		default:
+			sb.WriteString(u.textOf(c.GetAuthority()))
+		}
+	}
+	return sb.String()
+}
+
+func (u *unmarshaler) decodeEscape(esc *DefSetayEscapeSequence) string {
+	escText := u.textOf(esc.GetAuthority())
+	if len(escText) < 2 {
+		return escText
+	}
+	ch := escText[1]
+	switch ch {
+	case 't':
+		return "\t"
+	case 'r':
+		return "\r"
+	case 'n':
+		return "\n"
+	case '0':
+		return "\x00"
+	case '\\':
+		return "\\"
+	case '"':
+		return "\""
+	case '\'':
+		return "'"
+	case 'x':
+		if len(escText) == 4 {
+			n, _ := strconv.ParseInt(escText[2:4], 16, 32)
+			return string(rune(n))
+		}
+	case 'u':
+		if len(escText) == 6 {
+			n, _ := strconv.ParseInt(escText[2:6], 16, 32)
+			return string(rune(n))
+		}
+	case 'U':
+		if len(escText) == 10 {
+			n, _ := strconv.ParseInt(escText[2:10], 16, 32)
+			return string(rune(n))
+		}
+	}
+	return escText
+}
+
+// collectValues extracts all values from ListElements.
+func collectValues(elements *DefSetayListElements) []*DefSetayValue {
+	result := []*DefSetayValue{elements.First}
+	for _, sep := range elements.Rest {
+		result = append(result, sep.Value)
+	}
+	return result
+}
+
+// parseInteger parses an integer string, handling prefixes.
+func parseInteger(s string) (int64, error) {
+	neg := false
+	if strings.HasPrefix(s, "-") {
+		neg = true
+		s = s[1:]
+	}
+
+	var n int64
+	var err error
+
+	switch {
+	case strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X"):
+		n, err = strconv.ParseInt(s[2:], 16, 64)
+	case strings.HasPrefix(s, "0b") || strings.HasPrefix(s, "0B"):
+		n, err = strconv.ParseInt(s[2:], 2, 64)
+	case strings.HasPrefix(s, "0o") || strings.HasPrefix(s, "0O"):
+		n, err = strconv.ParseInt(s[2:], 8, 64)
+	case strings.HasPrefix(s, "0d") || strings.HasPrefix(s, "0D"):
+		n, err = strconv.ParseInt(s[2:], 10, 64)
+	default:
+		n, err = strconv.ParseInt(s, 10, 64)
+	}
+
+	if err != nil {
+		return 0, err
+	}
+	if neg {
+		n = -n
+	}
+	return n, nil
+}
+
+// parseFloat parses a float string.
+func parseFloat(s string) (float64, error) {
+	return strconv.ParseFloat(s, 64)
+}

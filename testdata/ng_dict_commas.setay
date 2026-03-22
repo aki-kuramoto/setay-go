@@ -1,0 +1,4 @@
+# NG: Commas in dict (should be semicolons)
+{
+	a = 1, b = 2
+}

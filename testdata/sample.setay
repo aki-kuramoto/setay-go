@@ -1,0 +1,42 @@
+#!/bin/setay
+{
+	name = "John S.";
+	"age" = 47;
+	job = 'aka-madoushi';
+	is-student = false;
+
+	# Information he didn't want to share
+	is_neet = true;
+	'hobbies' = [ "アニメ", 'ゲーム', "Rock'n' roll" ];
+	address =
+	{
+		city = "渋谷区";
+		"国または地域" = "Japan";
+	};
+
+	HEIGHT = 4.11;
+	weight = 180;
+	score = -3.14e2;
+	mask = 0xFF;
+	bits = 0b10101010;
+	perms = 0o755;
+	explicit_dec = 0d42;
+	leading_zero = 008;
+	negative_hex = -0xCAFE;
+	experiences = null;
+	created = UtcTs("2026-03-22 12:28:27");
+	modified = UtcTs('2026-03-22T21:28:27+09:00');
+	#{
+		You can write anything inside a comment.
+		The setay format is wonderful.
+	}#
+	escaped_str = "hello\tworld\n\x41\u0042\U00000043\\end";
+	empty_list = [];
+	empty_dict = {};
+	single_item_list = [ "solo" ];
+	single_item_dict = { only = "one" };
+	nested = { a = { b = { c = [1, 2, 3] } } };
+	#! This is a shebang-style reserved expression
+	## This is a ## style comment
+	last_entry = "no trailing semicolon"
+}

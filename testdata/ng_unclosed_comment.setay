@@ -1,0 +1,6 @@
+# NG: Unclosed multi-line comment
+{
+	#{
+		This comment is not closed
+	name = "John"
+}
