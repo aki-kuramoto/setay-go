@@ -212,7 +212,9 @@ func (m *marshaler) marshalSlice(v reflect.Value, depth int) {
 		}
 		m.out.WriteString(" ]")
 	} else {
-		m.out.WriteString(" = [\n")
+		m.out.WriteString(" =\n")
+		m.writeIndent(depth)
+		m.out.WriteString("[\n")
 		for i := 0; i < v.Len(); i++ {
 			m.writeIndent(depth + 1)
 			m.marshalInlineValue(v.Index(i))
