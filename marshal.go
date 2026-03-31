@@ -203,21 +203,35 @@ func (m *marshaler) marshalSlice(v reflect.Value, depth int) {
 
 	if allSimple && v.Len() <= 10 {
 		// Try single-line
-		m.out.WriteString(" = [ ")
+		m.out.WriteString(" = ")
+		m.marshalSliceWithoutEquals(v, depth, true)
+	} else {
+		m.out.WriteString(" =\n")
+		m.writeIndent(depth)
+		m.marshalSliceWithoutEquals(v, depth, false)
+	}
+}
+
+func (m *marshaler) marshalSliceWithoutEquals(v reflect.Value, depth int, allSimple bool) {
+	if v.IsNil() || v.Len() == 0 {
+		m.out.WriteString("[]")
+		return
+	}
+	if allSimple && v.Len() <= 10 {
+		// Try single-line
+		m.out.WriteString("[ ")
 		for i := 0; i < v.Len(); i++ {
 			if i > 0 {
 				m.out.WriteString(", ")
 			}
-			m.marshalInlineValue(v.Index(i))
+			m.marshalInlineValue(v.Index(i), depth)
 		}
 		m.out.WriteString(" ]")
 	} else {
-		m.out.WriteString(" =\n")
-		m.writeIndent(depth)
 		m.out.WriteString("[\n")
 		for i := 0; i < v.Len(); i++ {
 			m.writeIndent(depth + 1)
-			m.marshalInlineValue(v.Index(i))
+			m.marshalInlineValue(v.Index(i), depth+1)
 			m.out.WriteString(",\n")
 		}
 		m.writeIndent(depth)
@@ -228,13 +242,17 @@ func (m *marshaler) marshalSlice(v reflect.Value, depth int) {
 func (m *marshaler) marshalNestedDict(v reflect.Value, depth int) {
 	m.out.WriteString(" =\n")
 	m.writeIndent(depth)
+	m.marshalBlockWithoutEquals(v, depth)
+}
+
+func (m *marshaler) marshalBlockWithoutEquals(v reflect.Value, depth int) {
 	m.out.WriteString("{\n")
 	m.marshalDictBody(v, depth+1)
 	m.writeIndent(depth)
 	m.out.WriteByte('}')
 }
 
-func (m *marshaler) marshalInlineValue(v reflect.Value) {
+func (m *marshaler) marshalInlineValue(v reflect.Value, depth int) {
 	if v.Kind() == reflect.Interface {
 		if v.IsNil() {
 			m.out.WriteString("null")
@@ -287,6 +305,27 @@ func (m *marshaler) marshalInlineValue(v reflect.Value) {
 		} else {
 			m.out.WriteString(fmt.Sprintf("%g", f))
 		}
+	case reflect.Struct, reflect.Map:
+		m.marshalBlockWithoutEquals(v, depth)
+	case reflect.Slice, reflect.Array:
+		// Re-evaluate allSimple for inner slice
+		allSimple := true
+		for i := 0; i < v.Len(); i++ {
+			elem := v.Index(i)
+			if elem.Kind() == reflect.Interface || elem.Kind() == reflect.Ptr {
+				if !elem.IsNil() {
+					elem = elem.Elem()
+				}
+			}
+			k := elem.Kind()
+			if k == reflect.Struct || k == reflect.Map || k == reflect.Slice || k == reflect.Array {
+				if elem.Type().String() != "time.Time" {
+					allSimple = false
+					break
+				}
+			}
+		}
+		m.marshalSliceWithoutEquals(v, depth, allSimple)
 	default:
 		m.out.WriteString(fmt.Sprintf("\"%v\"", v.Interface()))
 	}
