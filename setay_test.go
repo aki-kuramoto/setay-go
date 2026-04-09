@@ -729,3 +729,250 @@ func TestVarBareDollarLiteral(t *testing.T) {
 	}
 }
 
+// ======================================================================
+//  Set tests
+// ======================================================================
+
+// TestUnmarshalSetInt: basic integer set.
+func TestUnmarshalSetInt(t *testing.T) {
+	input := `{
+		ids =
+			{
+				1=;
+				7=;
+				13=;
+				111=;
+			}
+	}`
+	var cfg struct {
+		IDs map[int]struct{} `setay:"ids"`
+	}
+	if err := setay.Unmarshal([]byte(input), &cfg); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	want := map[int]struct{}{1: {}, 7: {}, 13: {}, 111: {}}
+	if len(cfg.IDs) != len(want) {
+		t.Fatalf("IDs len = %d, want %d", len(cfg.IDs), len(want))
+	}
+	for k := range want {
+		if _, ok := cfg.IDs[k]; !ok {
+			t.Errorf("IDs missing key %d", k)
+		}
+	}
+}
+
+// TestUnmarshalSetString: string set.
+func TestUnmarshalSetString(t *testing.T) {
+	input := `{ tags = { "go"=; "setay"=; "open-source"=; } }`
+	var cfg struct {
+		Tags map[string]struct{} `setay:"tags"`
+	}
+	if err := setay.Unmarshal([]byte(input), &cfg); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	want := map[string]struct{}{"go": {}, "setay": {}, "open-source": {}}
+	if len(cfg.Tags) != len(want) {
+		t.Fatalf("Tags len = %d, want %d", len(cfg.Tags), len(want))
+	}
+	for k := range want {
+		if _, ok := cfg.Tags[k]; !ok {
+			t.Errorf("Tags missing key %q", k)
+		}
+	}
+}
+
+// TestUnmarshalSetEmpty: {=;} is an empty set.
+func TestUnmarshalSetEmpty(t *testing.T) {
+	input := `{ flags = {=;} }`
+	var cfg struct {
+		Flags map[string]struct{} `setay:"flags"`
+	}
+	if err := setay.Unmarshal([]byte(input), &cfg); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if len(cfg.Flags) != 0 {
+		t.Errorf("Flags len = %d, want 0", len(cfg.Flags))
+	}
+}
+
+// TestUnmarshalSetEmptyWithComments: {=;} with comments is still an empty set.
+func TestUnmarshalSetEmptyWithComments(t *testing.T) {
+	input := "{ flags = { #{ a comment }# =; #{ another }# } }"
+	var cfg struct {
+		Flags map[int]struct{} `setay:"flags"`
+	}
+	if err := setay.Unmarshal([]byte(input), &cfg); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if len(cfg.Flags) != 0 {
+		t.Errorf("Flags len = %d, want 0", len(cfg.Flags))
+	}
+}
+
+// TestUnmarshalSetSpaceBeforeSuffix: space before =; is allowed.
+func TestUnmarshalSetSpaceBeforeSuffix(t *testing.T) {
+	input := `{ ids = { 1 =; 2 =; 3 =; } }`
+	var cfg struct {
+		IDs map[int]struct{} `setay:"ids"`
+	}
+	if err := setay.Unmarshal([]byte(input), &cfg); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if len(cfg.IDs) != 3 {
+		t.Fatalf("IDs len = %d, want 3", len(cfg.IDs))
+	}
+}
+
+// TestUnmarshalSetFloat: float set.
+func TestUnmarshalSetFloat(t *testing.T) {
+	input := `{ scores = { 1.5=; 2.5=; 3.14=; } }`
+	var cfg struct {
+		Scores map[float64]struct{} `setay:"scores"`
+	}
+	if err := setay.Unmarshal([]byte(input), &cfg); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	want := map[float64]struct{}{1.5: {}, 2.5: {}, 3.14: {}}
+	if len(cfg.Scores) != len(want) {
+		t.Fatalf("Scores len = %d, want %d", len(cfg.Scores), len(want))
+	}
+	for k := range want {
+		if _, ok := cfg.Scores[k]; !ok {
+			t.Errorf("Scores missing key %v", k)
+		}
+	}
+}
+
+// TestUnmarshalSetBool: bool set.
+func TestUnmarshalSetBool(t *testing.T) {
+	input := `{ flags = { true=; false=; } }`
+	var cfg struct {
+		Flags map[bool]struct{} `setay:"flags"`
+	}
+	if err := setay.Unmarshal([]byte(input), &cfg); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if len(cfg.Flags) != 2 {
+		t.Fatalf("Flags len = %d, want 2", len(cfg.Flags))
+	}
+}
+
+// TestUnmarshalSetHexKey: hex integer key in a set.
+func TestUnmarshalSetHexKey(t *testing.T) {
+	input := `{ ids = { 0xFF=; 0x10=; } }`
+	var cfg struct {
+		IDs map[int]struct{} `setay:"ids"`
+	}
+	if err := setay.Unmarshal([]byte(input), &cfg); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	want := map[int]struct{}{255: {}, 16: {}}
+	if len(cfg.IDs) != len(want) {
+		t.Fatalf("IDs len = %d, want %d", len(cfg.IDs), len(want))
+	}
+	for k := range want {
+		if _, ok := cfg.IDs[k]; !ok {
+			t.Errorf("IDs missing key %d", k)
+		}
+	}
+}
+
+// TestUnmarshalSetErrorWrongValueType: map[K]string cannot receive a set.
+func TestUnmarshalSetErrorWrongValueType(t *testing.T) {
+	input := `{ ids = { 1=; 2=; } }`
+	var cfg struct {
+		IDs map[int]string `setay:"ids"`
+	}
+	err := setay.Unmarshal([]byte(input), &cfg)
+	if err == nil {
+		t.Fatal("Expected error for map[int]string receiving a set, got nil")
+	}
+}
+
+// TestMarshalSetInt: marshal map[int]struct{} as set.
+func TestMarshalSetInt(t *testing.T) {
+	type Cfg struct {
+		IDs map[int]struct{} `setay:"ids"`
+	}
+	cfg := Cfg{IDs: map[int]struct{}{1: {}, 7: {}}}
+	data, err := setay.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+	s := string(data)
+	if !strings.Contains(s, "1=;") || !strings.Contains(s, "7=;") {
+		t.Errorf("Marshal output missing set entries:\n%s", s)
+	}
+	// Must NOT contain " = 1" style (dict format)
+	if strings.Contains(s, "ids = 1") {
+		t.Errorf("Marshal output looks like dict, not set:\n%s", s)
+	}
+}
+
+// TestMarshalSetString: marshal map[string]struct{} as set.
+func TestMarshalSetString(t *testing.T) {
+	type Cfg struct {
+		Tags map[string]struct{} `setay:"tags"`
+	}
+	cfg := Cfg{Tags: map[string]struct{}{"go": {}, "setay": {}}}
+	data, err := setay.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+	s := string(data)
+	if !strings.Contains(s, `"go"=;`) && !strings.Contains(s, `"setay"=;`) {
+		t.Errorf("Marshal output missing set entries:\n%s", s)
+	}
+}
+
+// TestMarshalSetEmpty: empty map[K]struct{} marshals as {=;}.
+func TestMarshalSetEmpty(t *testing.T) {
+	type Cfg struct {
+		Tags map[string]struct{} `setay:"tags"`
+	}
+	cfg := Cfg{Tags: map[string]struct{}{}}
+	data, err := setay.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+	s := string(data)
+	if !strings.Contains(s, "{=;}") {
+		t.Errorf("Marshal output missing {=;} for empty set:\n%s", s)
+	}
+}
+
+// TestMarshalSetTopLevelError: top-level set should return an error.
+func TestMarshalSetTopLevelError(t *testing.T) {
+	_, err := setay.Marshal(map[int]struct{}{1: {}, 2: {}})
+	if err == nil {
+		t.Fatal("Expected error for top-level set marshal, got nil")
+	}
+}
+
+// TestRoundTripSet: marshal then unmarshal a set preserves all elements.
+func TestRoundTripSet(t *testing.T) {
+	type Cfg struct {
+		Ports map[int]struct{} `setay:"ports"`
+	}
+	original := Cfg{Ports: map[int]struct{}{80: {}, 443: {}, 8080: {}}}
+
+	data, err := setay.Marshal(original)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+
+	var restored Cfg
+	if err := setay.Unmarshal(data, &restored); err != nil {
+		t.Fatalf("Unmarshal error: %v\nInput:\n%s", err, data)
+	}
+
+	if len(restored.Ports) != len(original.Ports) {
+		t.Fatalf("Ports len = %d, want %d\nsetay:\n%s", len(restored.Ports), len(original.Ports), data)
+	}
+	for k := range original.Ports {
+		if _, ok := restored.Ports[k]; !ok {
+			t.Errorf("Ports missing key %d\nsetay:\n%s", k, data)
+		}
+	}
+}
+

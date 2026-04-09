@@ -226,6 +226,8 @@ func (u *unmarshaler) unmarshalValue(val *DefSetayValue, target reflect.Value) e
 	case *DefSetayNumber:
 		numText := u.textOf(v.GetAuthority())
 		return u.setNumber(target, numText)
+	case *DefSetaySet:
+		return u.unmarshalSet(v, target)
 	case *DefSetayDict:
 		return u.unmarshalDict(v, target)
 	case *DefSetayList:
@@ -553,6 +555,91 @@ func (u *unmarshaler) decodeEscape(esc *DefSetayEscapeSequence) string {
 		}
 	}
 	return escText
+}
+
+// unmarshalSet populates a map[K]struct{} from a SetaySet node.
+func (u *unmarshaler) unmarshalSet(set *DefSetaySet, target reflect.Value) error {
+	for target.Kind() == reflect.Ptr {
+		if target.IsNil() {
+			target.Set(reflect.New(target.Type().Elem()))
+		}
+		target = target.Elem()
+	}
+
+	if target.Kind() != reflect.Map {
+		return fmt.Errorf("setay: cannot unmarshal set into %s", target.Type())
+	}
+	emptyStruct := reflect.TypeOf(struct{}{})
+	if target.Type().Elem() != emptyStruct {
+		return fmt.Errorf("setay: cannot unmarshal set into %s (value type must be struct{})", target.Type())
+	}
+
+	if target.IsNil() {
+		target.Set(reflect.MakeMap(target.Type()))
+	}
+
+	switch v := set.Body.AnonymousField1.(type) {
+	case *DefSetaySetEmpty:
+		// empty set — map already initialized, nothing to do
+		return nil
+	case *DefSetaySetEntries:
+		keyType := target.Type().Key()
+		structVal := reflect.ValueOf(struct{}{})
+		for _, entry := range collectSetEntries(v) {
+			keyVal := reflect.New(keyType).Elem()
+			if err := u.unmarshalSetKey(entry.Key, keyVal); err != nil {
+				return err
+			}
+			target.SetMapIndex(keyVal, structVal)
+		}
+		return nil
+	default:
+		return fmt.Errorf("setay: unexpected set body type")
+	}
+}
+
+// unmarshalSetKey converts a SetaySetKey node into a Go reflect.Value.
+func (u *unmarshaler) unmarshalSetKey(key *DefSetaySetKey, target reflect.Value) error {
+	for target.Kind() == reflect.Ptr {
+		if target.IsNil() {
+			target.Set(reflect.New(target.Type().Elem()))
+		}
+		target = target.Elem()
+	}
+
+	switch v := key.AnonymousField1.(type) {
+	case *DefSetayVarRef:
+		resolved, err := u.resolveVarRef(v)
+		if err != nil {
+			return err
+		}
+		return u.setFromString(target, resolved)
+	case *DefSetayNull:
+		return u.setNull(target)
+	case *DefSetayTrue:
+		return u.setBool(target, true)
+	case *DefSetayFalse:
+		return u.setBool(target, false)
+	case *DefSetayString:
+		s := u.decodeString(v)
+		return u.setString(target, s)
+	case *DefSetayNumber:
+		numText := u.textOf(v.GetAuthority())
+		return u.setNumber(target, numText)
+	case *DefSetayUtcTs:
+		return u.setUtcTs(v, target)
+	default:
+		return fmt.Errorf("setay: unsupported set key type")
+	}
+}
+
+// collectSetEntries gathers all entries from SetaySetEntries.
+func collectSetEntries(entries *DefSetaySetEntries) []*DefSetaySetEntry {
+	result := []*DefSetaySetEntry{entries.First}
+	for _, e := range entries.Rest {
+		result = append(result, e)
+	}
+	return result
 }
 
 // collectValues extracts all values from ListElements.

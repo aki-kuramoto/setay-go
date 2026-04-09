@@ -34,6 +34,9 @@ func MarshalIndent(v interface{}, indent string) ([]byte, error) {
 	if rv.Kind() != reflect.Struct && rv.Kind() != reflect.Map {
 		return nil, fmt.Errorf("setay: cannot marshal %s (must be struct or map)", rv.Kind())
 	}
+	if rv.Kind() == reflect.Map && rv.Type().Elem() == reflect.TypeOf(struct{}{}) {
+		return nil, fmt.Errorf("setay: cannot marshal map[%s]struct{} as top-level document (sets must appear as field values)", rv.Type().Key())
+	}
 	m.marshalTopLevel(rv)
 	return []byte(m.out.String()), nil
 }
@@ -171,7 +174,11 @@ func (m *marshaler) marshalFieldValue(v reflect.Value, depth int) {
 	case reflect.Struct:
 		m.marshalNestedDict(v, depth)
 	case reflect.Map:
-		m.marshalNestedDict(v, depth)
+		if v.Type().Elem() == reflect.TypeOf(struct{}{}) {
+			m.marshalNestedSet(v, depth)
+		} else {
+			m.marshalNestedDict(v, depth)
+		}
 	default:
 		m.out.WriteString(fmt.Sprintf(" = \"%v\"", v.Interface()))
 	}
@@ -245,6 +252,31 @@ func (m *marshaler) marshalNestedDict(v reflect.Value, depth int) {
 	m.marshalBlockWithoutEquals(v, depth)
 }
 
+func (m *marshaler) marshalNestedSet(v reflect.Value, depth int) {
+	if v.IsNil() || v.Len() == 0 {
+		m.out.WriteString(" = {=;}")
+		return
+	}
+	m.out.WriteString(" =\n")
+	m.writeIndent(depth)
+	m.marshalSetBlockWithoutEquals(v, depth)
+}
+
+func (m *marshaler) marshalSetBlockWithoutEquals(v reflect.Value, depth int) {
+	if v.IsNil() || v.Len() == 0 {
+		m.out.WriteString("{=;}")
+		return
+	}
+	m.out.WriteString("{\n")
+	for _, key := range v.MapKeys() {
+		m.writeIndent(depth + 1)
+		m.marshalInlineValue(key, depth+1)
+		m.out.WriteString("=;\n")
+	}
+	m.writeIndent(depth)
+	m.out.WriteByte('}')
+}
+
 func (m *marshaler) marshalBlockWithoutEquals(v reflect.Value, depth int) {
 	m.out.WriteString("{\n")
 	m.marshalDictBody(v, depth+1)
@@ -305,8 +337,14 @@ func (m *marshaler) marshalInlineValue(v reflect.Value, depth int) {
 		} else {
 			m.out.WriteString(fmt.Sprintf("%g", f))
 		}
-	case reflect.Struct, reflect.Map:
+	case reflect.Struct:
 		m.marshalBlockWithoutEquals(v, depth)
+	case reflect.Map:
+		if v.Type().Elem() == reflect.TypeOf(struct{}{}) {
+			m.marshalSetBlockWithoutEquals(v, depth)
+		} else {
+			m.marshalBlockWithoutEquals(v, depth)
+		}
 	case reflect.Slice, reflect.Array:
 		// Re-evaluate allSimple for inner slice
 		allSimple := true

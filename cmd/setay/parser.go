@@ -208,6 +208,62 @@ type DefSetayFalse struct {
 
 func (n *DefSetayFalse) GetAuthority() *Authority { return n.Authority }
 
+// DefSetaySet is the parse result of the SetaySet rule.
+type DefSetaySet struct {
+	Authority *Authority
+	AnonymousField1 StringFromSource
+	AnonymousField2 *DefSetaySpacing
+	Body *DefSetaySetBody
+	AnonymousField3 *DefSetaySpacing
+	AnonymousField4 StringFromSource
+}
+
+func (n *DefSetaySet) GetAuthority() *Authority { return n.Authority }
+
+// DefSetaySetBody is the parse result of the SetaySetBody rule.
+type DefSetaySetBody struct {
+	Authority *Authority
+	AnonymousField1 ParseNode
+}
+
+func (n *DefSetaySetBody) GetAuthority() *Authority { return n.Authority }
+
+// DefSetaySetEmpty is the parse result of the SetaySetEmpty rule.
+type DefSetaySetEmpty struct {
+	Authority *Authority
+	AnonymousField1 StringFromSource
+}
+
+func (n *DefSetaySetEmpty) GetAuthority() *Authority { return n.Authority }
+
+// DefSetaySetEntries is the parse result of the SetaySetEntries rule.
+type DefSetaySetEntries struct {
+	Authority *Authority
+	First *DefSetaySetEntry
+	Rest []*DefSetaySetEntry
+}
+
+func (n *DefSetaySetEntries) GetAuthority() *Authority { return n.Authority }
+
+// DefSetaySetEntry is the parse result of the SetaySetEntry rule.
+type DefSetaySetEntry struct {
+	Authority *Authority
+	AnonymousField1 *DefSetaySpacing
+	Key *DefSetaySetKey
+	AnonymousField2 *DefSetaySpacing
+	AnonymousField3 StringFromSource
+}
+
+func (n *DefSetaySetEntry) GetAuthority() *Authority { return n.Authority }
+
+// DefSetaySetKey is the parse result of the SetaySetKey rule.
+type DefSetaySetKey struct {
+	Authority *Authority
+	AnonymousField1 ParseNode
+}
+
+func (n *DefSetaySetKey) GetAuthority() *Authority { return n.Authority }
+
 // DefSetayDict is the parse result of the SetayDict rule.
 type DefSetayDict struct {
 	Authority *Authority
@@ -905,6 +961,14 @@ func (p *PackratParser) parseSetayValue(pos int) (*DefSetayValue, int, error) {
 			}
 		}
 		if !choiceMatched {
+			node, end, err := p.parseSetaySet(pos)
+			if err == nil {
+				result.AnonymousField1 = node
+				pos = end
+				choiceMatched = true
+			}
+		}
+		if !choiceMatched {
 			node, end, err := p.parseSetayDict(pos)
 			if err == nil {
 				result.AnonymousField1 = node
@@ -1099,6 +1163,385 @@ func (p *PackratParser) parseSetayFalse(pos int) (*DefSetayFalse, int, error) {
 	}
 	result.Authority = p.makeAuthority(startPos, pos)
 	p.memoize("SetayFalse", startPos, result, pos, nil)
+	return result, pos, nil
+}
+
+func (p *PackratParser) parseSetaySet(pos int) (*DefSetaySet, int, error) {
+	if m, ok := p.getMemo("SetaySet", pos); ok {
+		if m.err != nil {
+			return nil, m.end, m.err
+		}
+		return m.node.(*DefSetaySet), m.end, nil
+	}
+
+	if err := p.enterRule(); err != nil {
+		return nil, pos, err
+	}
+	defer p.leaveRule()
+
+	startPos := pos
+	result := &DefSetaySet{}
+
+	// Field: AnonymousField1 (Literal "{")
+	{
+		expected := []rune("{")
+		if pos+len(expected) > len(p.input) {
+			err := fmt.Errorf("line %d: expected %q, got EOF", p.lineAt(pos), "{")
+			p.memoize("SetaySet", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+		matched := true
+		for i, r := range expected {
+			if p.input[pos+i] != r { matched = false; break }
+		}
+		if !matched {
+			err := fmt.Errorf("line %d: expected %q", p.lineAt(pos), "{")
+			p.memoize("SetaySet", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+		result.AnonymousField1 = p.makeStringFromSource(pos, pos+len(expected))
+		pos += len(expected)
+	}
+	// Field: AnonymousField2 (Reference -> SetaySpacing)
+	{
+		node, end, err := p.parseSetaySpacing(pos)
+		if err != nil {
+			p.memoize("SetaySet", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+		result.AnonymousField2 = node
+		pos = end
+	}
+	// Field: Body (Reference -> SetaySetBody)
+	{
+		node, end, err := p.parseSetaySetBody(pos)
+		if err != nil {
+			p.memoize("SetaySet", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+		result.Body = node
+		pos = end
+	}
+	// Field: AnonymousField3 (Reference -> SetaySpacing)
+	{
+		node, end, err := p.parseSetaySpacing(pos)
+		if err != nil {
+			p.memoize("SetaySet", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+		result.AnonymousField3 = node
+		pos = end
+	}
+	// Field: AnonymousField4 (Literal "}")
+	{
+		expected := []rune("}")
+		if pos+len(expected) > len(p.input) {
+			err := fmt.Errorf("line %d: expected %q, got EOF", p.lineAt(pos), "}")
+			p.memoize("SetaySet", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+		matched := true
+		for i, r := range expected {
+			if p.input[pos+i] != r { matched = false; break }
+		}
+		if !matched {
+			err := fmt.Errorf("line %d: expected %q", p.lineAt(pos), "}")
+			p.memoize("SetaySet", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+		result.AnonymousField4 = p.makeStringFromSource(pos, pos+len(expected))
+		pos += len(expected)
+	}
+	result.Authority = p.makeAuthority(startPos, pos)
+	p.memoize("SetaySet", startPos, result, pos, nil)
+	return result, pos, nil
+}
+
+func (p *PackratParser) parseSetaySetBody(pos int) (*DefSetaySetBody, int, error) {
+	if m, ok := p.getMemo("SetaySetBody", pos); ok {
+		if m.err != nil {
+			return nil, m.end, m.err
+		}
+		return m.node.(*DefSetaySetBody), m.end, nil
+	}
+
+	if err := p.enterRule(); err != nil {
+		return nil, pos, err
+	}
+	defer p.leaveRule()
+
+	startPos := pos
+	result := &DefSetaySetBody{}
+
+	// Field: AnonymousField1 (Choice)
+	{
+		var choiceMatched bool
+		if !choiceMatched {
+			node, end, err := p.parseSetaySetEmpty(pos)
+			if err == nil {
+				result.AnonymousField1 = node
+				pos = end
+				choiceMatched = true
+			}
+		}
+		if !choiceMatched {
+			node, end, err := p.parseSetaySetEntries(pos)
+			if err == nil {
+				result.AnonymousField1 = node
+				pos = end
+				choiceMatched = true
+			}
+		}
+		if !choiceMatched {
+			err := fmt.Errorf("line %d: no choice matched for field AnonymousField1", p.lineAt(pos))
+			p.memoize("SetaySetBody", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+	}
+	result.Authority = p.makeAuthority(startPos, pos)
+	p.memoize("SetaySetBody", startPos, result, pos, nil)
+	return result, pos, nil
+}
+
+func (p *PackratParser) parseSetaySetEmpty(pos int) (*DefSetaySetEmpty, int, error) {
+	if m, ok := p.getMemo("SetaySetEmpty", pos); ok {
+		if m.err != nil {
+			return nil, m.end, m.err
+		}
+		return m.node.(*DefSetaySetEmpty), m.end, nil
+	}
+
+	if err := p.enterRule(); err != nil {
+		return nil, pos, err
+	}
+	defer p.leaveRule()
+
+	startPos := pos
+	result := &DefSetaySetEmpty{}
+
+	// Field: AnonymousField1 (Literal "=;")
+	{
+		expected := []rune("=;")
+		if pos+len(expected) > len(p.input) {
+			err := fmt.Errorf("line %d: expected %q, got EOF", p.lineAt(pos), "=;")
+			p.memoize("SetaySetEmpty", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+		matched := true
+		for i, r := range expected {
+			if p.input[pos+i] != r { matched = false; break }
+		}
+		if !matched {
+			err := fmt.Errorf("line %d: expected %q", p.lineAt(pos), "=;")
+			p.memoize("SetaySetEmpty", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+		result.AnonymousField1 = p.makeStringFromSource(pos, pos+len(expected))
+		pos += len(expected)
+	}
+	result.Authority = p.makeAuthority(startPos, pos)
+	p.memoize("SetaySetEmpty", startPos, result, pos, nil)
+	return result, pos, nil
+}
+
+func (p *PackratParser) parseSetaySetEntries(pos int) (*DefSetaySetEntries, int, error) {
+	if m, ok := p.getMemo("SetaySetEntries", pos); ok {
+		if m.err != nil {
+			return nil, m.end, m.err
+		}
+		return m.node.(*DefSetaySetEntries), m.end, nil
+	}
+
+	if err := p.enterRule(); err != nil {
+		return nil, pos, err
+	}
+	defer p.leaveRule()
+
+	startPos := pos
+	result := &DefSetaySetEntries{}
+
+	// Field: First (Reference -> SetaySetEntry)
+	{
+		node, end, err := p.parseSetaySetEntry(pos)
+		if err != nil {
+			p.memoize("SetaySetEntries", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+		result.First = node
+		pos = end
+	}
+	// Field: Rest (Repeat)
+	{
+		var repCount int
+		for {
+			repCount++
+			if repCount > MaxRepeatCount { return nil, pos, ErrRepeatLimitExceeded }
+			node, end, err := p.parseSetaySetEntry(pos)
+			if err != nil { break }
+			if end == pos { break } // prevent zero-length match
+			result.Rest = append(result.Rest, node)
+			pos = end
+		}
+	}
+	result.Authority = p.makeAuthority(startPos, pos)
+	p.memoize("SetaySetEntries", startPos, result, pos, nil)
+	return result, pos, nil
+}
+
+func (p *PackratParser) parseSetaySetEntry(pos int) (*DefSetaySetEntry, int, error) {
+	if m, ok := p.getMemo("SetaySetEntry", pos); ok {
+		if m.err != nil {
+			return nil, m.end, m.err
+		}
+		return m.node.(*DefSetaySetEntry), m.end, nil
+	}
+
+	if err := p.enterRule(); err != nil {
+		return nil, pos, err
+	}
+	defer p.leaveRule()
+
+	startPos := pos
+	result := &DefSetaySetEntry{}
+
+	// Field: AnonymousField1 (Reference -> SetaySpacing)
+	{
+		node, end, err := p.parseSetaySpacing(pos)
+		if err != nil {
+			p.memoize("SetaySetEntry", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+		result.AnonymousField1 = node
+		pos = end
+	}
+	// Field: Key (Reference -> SetaySetKey)
+	{
+		node, end, err := p.parseSetaySetKey(pos)
+		if err != nil {
+			p.memoize("SetaySetEntry", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+		result.Key = node
+		pos = end
+	}
+	// Field: AnonymousField2 (Reference -> SetaySpacing)
+	{
+		node, end, err := p.parseSetaySpacing(pos)
+		if err != nil {
+			p.memoize("SetaySetEntry", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+		result.AnonymousField2 = node
+		pos = end
+	}
+	// Field: AnonymousField3 (Literal "=;")
+	{
+		expected := []rune("=;")
+		if pos+len(expected) > len(p.input) {
+			err := fmt.Errorf("line %d: expected %q, got EOF", p.lineAt(pos), "=;")
+			p.memoize("SetaySetEntry", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+		matched := true
+		for i, r := range expected {
+			if p.input[pos+i] != r { matched = false; break }
+		}
+		if !matched {
+			err := fmt.Errorf("line %d: expected %q", p.lineAt(pos), "=;")
+			p.memoize("SetaySetEntry", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+		result.AnonymousField3 = p.makeStringFromSource(pos, pos+len(expected))
+		pos += len(expected)
+	}
+	result.Authority = p.makeAuthority(startPos, pos)
+	p.memoize("SetaySetEntry", startPos, result, pos, nil)
+	return result, pos, nil
+}
+
+func (p *PackratParser) parseSetaySetKey(pos int) (*DefSetaySetKey, int, error) {
+	if m, ok := p.getMemo("SetaySetKey", pos); ok {
+		if m.err != nil {
+			return nil, m.end, m.err
+		}
+		return m.node.(*DefSetaySetKey), m.end, nil
+	}
+
+	if err := p.enterRule(); err != nil {
+		return nil, pos, err
+	}
+	defer p.leaveRule()
+
+	startPos := pos
+	result := &DefSetaySetKey{}
+
+	// Field: AnonymousField1 (Choice)
+	{
+		var choiceMatched bool
+		if !choiceMatched {
+			node, end, err := p.parseSetayVarRef(pos)
+			if err == nil {
+				result.AnonymousField1 = node
+				pos = end
+				choiceMatched = true
+			}
+		}
+		if !choiceMatched {
+			node, end, err := p.parseSetayUtcTs(pos)
+			if err == nil {
+				result.AnonymousField1 = node
+				pos = end
+				choiceMatched = true
+			}
+		}
+		if !choiceMatched {
+			node, end, err := p.parseSetayTrue(pos)
+			if err == nil {
+				result.AnonymousField1 = node
+				pos = end
+				choiceMatched = true
+			}
+		}
+		if !choiceMatched {
+			node, end, err := p.parseSetayFalse(pos)
+			if err == nil {
+				result.AnonymousField1 = node
+				pos = end
+				choiceMatched = true
+			}
+		}
+		if !choiceMatched {
+			node, end, err := p.parseSetayNull(pos)
+			if err == nil {
+				result.AnonymousField1 = node
+				pos = end
+				choiceMatched = true
+			}
+		}
+		if !choiceMatched {
+			node, end, err := p.parseSetayNumber(pos)
+			if err == nil {
+				result.AnonymousField1 = node
+				pos = end
+				choiceMatched = true
+			}
+		}
+		if !choiceMatched {
+			node, end, err := p.parseSetayString(pos)
+			if err == nil {
+				result.AnonymousField1 = node
+				pos = end
+				choiceMatched = true
+			}
+		}
+		if !choiceMatched {
+			err := fmt.Errorf("line %d: no choice matched for field AnonymousField1", p.lineAt(pos))
+			p.memoize("SetaySetKey", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+	}
+	result.Authority = p.makeAuthority(startPos, pos)
+	p.memoize("SetaySetKey", startPos, result, pos, nil)
 	return result, pos, nil
 }
 

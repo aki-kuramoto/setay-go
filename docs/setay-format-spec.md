@@ -4,7 +4,7 @@
 
 The `setay` format is designed primarily for saving and loading structured data in text form.
 
-It is built around simple values, **lists** (ordered sequences of values), and **dicts** (ordered sequences of key–value pairs called entries). Lists and dicts can contain not only simple values but also other lists and dicts, enabling nested structures.
+It is built around simple values, **lists** (ordered sequences of values), **dicts** (ordered sequences of key–value pairs called entries), and **sets** (unordered collections of unique scalar elements). Lists, dicts, and sets can contain not only simple values but also other lists, dicts, and sets, enabling nested structures.
 
 # 1. Basic Structure
 
@@ -19,6 +19,10 @@ A list holds an ordered sequence of values, e.g. `[ "G", "O", "D", ]`.
 ## Dict `{ ... }`
 
 A dict holds an ordered sequence of key–value entries, e.g. `{ "key1" = "value1"; "key2" = "value2"; }`.
+
+## Set `{ key=; ... }`
+
+A set holds an unordered collection of unique scalar elements, e.g. `{ 1=; 7=; 42=; }`. See Section 6 for details.
 
 # 2. Value Types
 
@@ -184,7 +188,75 @@ The following sources are tried in order:
 
 Variable references are an **unmarshal-only** feature. `Marshal` (Go → setay) always writes concrete values.
 
-# 6. Example
+# 6. Sets
+
+A **set** is an unordered collection of unique scalar elements. In Go, sets are represented as `map[ELEMENT_TYPE]struct{}`.
+
+## 6.1 Syntax
+
+Each element is written as `key =;` — the `=;` token is **atomic** (no space is allowed between `=` and `;`). A space *before* `=;` is allowed.
+
+```setay
+{
+	allowed-ports =
+		{
+			80=;
+			443=;
+			8080=;
+		};
+}
+```
+
+Every element must end with `=;`. Omitting the final `=;` is not permitted.
+
+## 6.2 Empty Set
+
+An empty set is written as `{=;}`. This is distinct from the empty dict `{}`.
+
+```setay
+{
+	blocked-ips = {=;};
+}
+```
+
+Comments and whitespace are allowed inside an empty set:
+
+```setay
+{ flags = { #{ reserved for future use }# =; } }
+```
+
+## 6.3 Set Key Types
+
+Set keys are restricted to **scalar (comparable) values**:
+
+| Allowed key types |
+|-------------------|
+| Integer (`1`, `0xFF`, `0b1010`, …) |
+| Float (`3.14`, `-0.5`, …) |
+| String (`"hello"`, `'world'`, …) |
+| Boolean (`true`, `false`) |
+| `null` |
+| UTC Timestamp (`UtcTs("2026-01-01 00:00:00")`) |
+| Variable reference (`${VAR}`) |
+
+Dicts, lists, and nested sets **cannot** be used as set keys (they are not comparable in Go).
+
+## 6.4 Go Mapping
+
+| Setay | Go |
+|-------|----|
+| `{ 1=; 2=; }` | `map[int]struct{}` |
+| `{ "a"=; "b"=; }` | `map[string]struct{}` |
+| `{ 1.5=; 2.5=; }` | `map[float64]struct{}` |
+| `{=;}` | `map[K]struct{}` (empty) |
+
+A `map[K]struct{}` **cannot** appear as the top-level document (the top level must always be a dict).
+
+## 6.5 Marshal Output
+
+`Marshal` / `MarshalIndent` automatically detect `map[K]struct{}` and emits set syntax. An empty map emits `{=;}` inline; a non-empty map emits a multi-line block.
+
+# 7. Example
 
 ```setay
 #!/bin/setay
@@ -213,7 +285,7 @@ Variable references are an **unmarshal-only** feature. `Marshal` (Go → setay) 
 }
 ```
 
-# 7. Standard Style
+# 8. Standard Style
 
 - Indentation uses horizontal tabs by default.
   - However, spaces are used for alignment after the first non-tab character on a line.
@@ -246,7 +318,7 @@ Variable references are an **unmarshal-only** feature. `Marshal` (Go → setay) 
 }
 ```
 
-# 8. String Escape Sequences
+# 9. String Escape Sequences
 
 - `\` is used as the escape character.
 - To represent `\` itself, use `\\`.
@@ -281,8 +353,9 @@ Variable references are an **unmarshal-only** feature. `Marshal` (Go → setay) 
 
 シンプルな値に、
 リストという値の並びを保持する構造と
-ディクトというキーと値のペア (エントリー) の並びを保持する構造を主軸としており、
-リストとディクトの値として、シンプルな値だけではなくリストやディクトを指定できる事でネストした構造を表現可能です。
+ディクトというキーと値のペア (エントリー) の並びを保持する構造、
+そしてセットというスカラー値の重複しない要素の集合を主軸としており、
+これらの値として、シンプルな値だけではなくリストやディクト、セットを指定できる事でネストした構造を表現可能です。
 
 # 1. setay の基本構造
 
@@ -297,6 +370,10 @@ Variable references are an **unmarshal-only** feature. `Marshal` (Go → setay) 
 ## ディクト `{ ... }`
 
 ディクトは `{ "key1" = "value1"; "key2" = "value2"; }` のように、キーと値のペアの並びを保持する構造です。
+
+## セット `{ key=; ... }`
+
+セットは `{ 1=; 7=; 42=; }` のように、スカラー値の重複しない要素の集合を保持する構造です。詳細は Section 6 を参照してください。
 
 # 2. setay の値型
 
@@ -472,7 +549,75 @@ message = "Hello, ${NAME ?: 'stranger'}! Port is ${PORT ?: 8080}.";
 
 変数参照は **アンマーシャル専用** の機能です。`Marshal`（Go → setay）は常に具体的な値を書き出します。
 
-# 6. 具体的な記述例
+# 6. セット
+
+**セット** はスカラー値の重複しない要素の集合です。Go では `map[ELEMENT_TYPE]struct{}` に対応します。
+
+## 6.1 構文
+
+各要素は `key =;` の形式で記述します。`=;` は**アトミックなトークン**であり、`=` と `;` の間にスペースを入れることはできません。`=;` の直前にスペースを入れることは許されます。
+
+```setay
+{
+	allowed-ports =
+		{
+			80=;
+			443=;
+			8080=;
+		};
+}
+```
+
+すべての要素は `=;` で終わる必要があります。最後の要素の `=;` も省略できません。
+
+## 6.2 空セット
+
+空セットは `{=;}` と記述します。空ディクト `{}` とは区別されます。
+
+```setay
+{
+	blocked-ips = {=;};
+}
+```
+
+空セット内にコメントや空白を入れることも可能です：
+
+```setay
+{ flags = { #{ 将来のために予約 }# =; } }
+```
+
+## 6.3 セットのキー型
+
+セットのキーに使用できるのは**スカラー (比較可能) な値**のみです：
+
+| 使用可能なキー型 |
+|----------------|
+| 整数 (`1`, `0xFF`, `0b1010`, …) |
+| 浮動小数点数 (`3.14`, `-0.5`, …) |
+| 文字列 (`"hello"`, `'world'`, …) |
+| 真偽値 (`true`, `false`) |
+| `null` |
+| UTC タイムスタンプ (`UtcTs("2026-01-01 00:00:00")`) |
+| 変数参照 (`${VAR}`) |
+
+ディクト、リスト、ネストされたセットは Go のマップキーとして使用できないため、セットのキーにすることも**できません**。
+
+## 6.4 Go との対応
+
+| Setay | Go |
+|-------|----|
+| `{ 1=; 2=; }` | `map[int]struct{}` |
+| `{ "a"=; "b"=; }` | `map[string]struct{}` |
+| `{ 1.5=; 2.5=; }` | `map[float64]struct{}` |
+| `{=;}` | `map[K]struct{}` (空) |
+
+`map[K]struct{}` をトップレベルのドキュメントとして使用することは**できません**（トップレベルは常にディクトである必要があります）。
+
+## 6.5 マーシャル出力
+
+`Marshal` / `MarshalIndent` は `map[K]struct{}` を自動検出し、セット記法で出力します。空のマップは `{=;}` をインラインで出力し、要素があれば複数行ブロックで出力します。
+
+# 7. 具体的な記述例
 
 ```setay
 #!/bin/setay
@@ -501,7 +646,7 @@ message = "Hello, ${NAME ?: 'stranger'}! Port is ${PORT ?: 8080}.";
 }
 ```
 
-# 7. 標準のスタイル
+# 8. 標準のスタイル
 
 - インデントには原則として水平タブを用います。
 	- ただし、行頭から一度でも水平タブ以外の文字が出現した後のレイアウトには空白を用います。
@@ -534,7 +679,7 @@ message = "Hello, ${NAME ?: 'stranger'}! Port is ${PORT ?: 8080}.";
 }
 ```
 
-# 8. 文字列内のエスケープ記法
+# 9. 文字列内のエスケープ記法
 
 - `\` をエスケープ用の文字として使用します。
 - `\` 自体を表したい場合には `\\` のように二重にする事で表現できます。
