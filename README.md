@@ -15,6 +15,7 @@ Setay is a human-friendly data serialization format designed for configuration f
 - **`encoding/json`-style API** — `Marshal`, `Unmarshal`, `MarshalFile`, `UnmarshalFile`
 - **Struct tags** — `setay:"name,omitempty"`, `setay:"-"`
 - **Rich data types** — strings, integers (decimal/hex/binary/octal), floats, booleans, null, `UtcTs` timestamps
+- **Sets** — `map[K]struct{}` marshals/unmarshals as `{ key=; ... }` set syntax
 - **Variable references** — `${VAR_NAME}` syntax resolves environment variables or custom resolver values at unmarshal time, with `?:` fallback chains and string interpolation
 - **[wantai](https://github.com/aki-kuramoto/wantai) integration** — Native support for wantai's typed UTC timestamp wrappers
 - **CLI formatter** — `setay fmt` to format `.setay` files in the standard style
@@ -107,6 +108,48 @@ setay.MarshalFile("config.setay", cfg)
 var loaded Config
 setay.UnmarshalFile("config.setay", &loaded)
 ```
+
+## Sets
+
+Sets are represented in Go as `map[K]struct{}`. In setay, each element is written as `key =;` — the `=;` suffix is **atomic** (no space between `=` and `;`).
+
+```go
+type Firewall struct {
+    AllowedPorts map[int]struct{}    `setay:"allowed-ports"`
+    BlockedIPs   map[string]struct{} `setay:"blocked-ips"`
+}
+
+// Marshal
+fw := Firewall{
+    AllowedPorts: map[int]struct{}{80: {}, 443: {}, 8080: {}},
+    BlockedIPs:   map[string]struct{}{},
+}
+data, _ := setay.Marshal(fw)
+// Output:
+// {
+// 	allowed-ports =
+// 	{
+// 		80=;
+// 		443=;
+// 		8080=;
+// 	};
+// 	blocked-ips = {=;};
+// }
+
+// Unmarshal
+input := `{
+    allowed-ports = { 80=; 443=; };
+    blocked-ips   = { "192.168.1.1"=; "10.0.0.5"=; };
+}`
+var loaded Firewall
+setay.Unmarshal([]byte(input), &loaded)
+```
+
+**Rules:**
+- `{=;}` is the empty set (distinct from the empty dict `{}`)
+- A space before `=;` is allowed; no space inside `=;`
+- Set keys must be scalar values (int, float, string, bool, null, timestamp, or variable reference)
+- `map[K]struct{}` cannot be used as the top-level document
 
 ## Variable References
 
@@ -290,6 +333,7 @@ setay は設定ファイルや構造化データの保存を目的に設計さ�
 - **`encoding/json` スタイルの API** — `Marshal`, `Unmarshal`, `MarshalFile`, `UnmarshalFile`
 - **構造体タグ** — `setay:"name,omitempty"`, `setay:"-"`
 - **豊富なデータ型** — 文字列、整数（10進/16進/2進/8進）、浮動小数点、真偽値、null、`UtcTs` タイムスタンプ
+- **セット** — `map[K]struct{}` を `{ key=; ... }` のセット記法でマーシャル/アンマーシャル
 - **変数参照** — `${VAR_NAME}` 構文でアンマーシャル時に環境変数やカスタムリゾルバーから値を解決。`?:` フォールバックチェーンと文字列補間に対応
 - **[wantai](https://github.com/aki-kuramoto/wantai) 連携** — wantai の型付き UTC タイムスタンプラッパーをネイティブサポート
 - **CLI フォーマッター** — `setay fmt` で `.setay` ファイルを標準スタイルに整形
@@ -382,6 +426,48 @@ setay.MarshalFile("config.setay", cfg)
 var loaded Config
 setay.UnmarshalFile("config.setay", &loaded)
 ```
+
+## セット
+
+Go では `map[K]struct{}` としてセットを表現します。setay では各要素を `key =;` と記述します。`=;` サフィックスは**アトミック**（`=` と `;` の間にスペース不可）です。
+
+```go
+type Firewall struct {
+    AllowedPorts map[int]struct{}    `setay:"allowed-ports"`
+    BlockedIPs   map[string]struct{} `setay:"blocked-ips"`
+}
+
+// マーシャル
+fw := Firewall{
+    AllowedPorts: map[int]struct{}{80: {}, 443: {}, 8080: {}},
+    BlockedIPs:   map[string]struct{}{},
+}
+data, _ := setay.Marshal(fw)
+// 出力:
+// {
+// 	allowed-ports =
+// 	{
+// 		80=;
+// 		443=;
+// 		8080=;
+// 	};
+// 	blocked-ips = {=;};
+// }
+
+// アンマーシャル
+input := `{
+    allowed-ports = { 80=; 443=; };
+    blocked-ips   = { "192.168.1.1"=; "10.0.0.5"=; };
+}`
+var loaded Firewall
+setay.Unmarshal([]byte(input), &loaded)
+```
+
+**ルール:**
+- `{=;}` が空セット（空ディクト `{}` とは別物）
+- `=;` の直前にスペースは許可、`=;` 内部にスペース不可
+- セットのキーはスカラー値のみ（int, float, string, bool, null, タイムスタンプ、変数参照）
+- `map[K]struct{}` はトップレベルのドキュメントには使用不可
 
 ## 変数参照
 

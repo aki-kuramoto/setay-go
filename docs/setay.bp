@@ -18,7 +18,7 @@ root-def SetayDocument
 def SetayValue
 {
 	_: SetayVarRef
-	   or SetayDict or SetayList
+	   or SetaySet or SetayDict or SetayList
 	   or SetayUtcTs
 	   or SetayTrue or SetayFalse or SetayNull
 	   or SetayNumber
@@ -30,6 +30,64 @@ def SetayValue
 def SetayNull  { _: "null"; };
 def SetayTrue  { _: "true"; };
 def SetayFalse { _: "false"; };
+
+# ======================================================================
+#  Set { key=; ... }
+# ======================================================================
+
+# A set is written as a dict-like block where every entry has no value,
+# using the atomic token "=;" as the entry terminator.
+# The empty set is written as {=;} (not {} which is the empty dict).
+# Spaces are allowed between the key and "=;", but not inside "=;" itself.
+# Go mapping: map[ELEMENT_TYPE]struct{}
+def SetaySet
+{
+	_: '{';
+	_: SetaySpacing;
+	body: SetaySetBody;
+	_: SetaySpacing;
+	_: '}';
+};
+
+def SetaySetBody
+{
+	_: SetaySetEmpty or SetaySetEntries;
+};
+
+# Empty set body: just the "=;" token (surrounding spacing handled by SetaySet).
+def SetaySetEmpty
+{
+	_: "=;";
+};
+
+# Non-empty set: one or more entries (each self-terminating with "=;").
+def SetaySetEntries
+{
+	first: SetaySetEntry;
+	rest: zero-or-more<SetaySetEntry>;
+};
+
+# A single set entry: key  =;
+# Spacing before "=;" is allowed; "=;" itself is atomic (no internal space).
+def SetaySetEntry
+{
+	_: SetaySpacing;
+	key: SetaySetKey;
+	_: SetaySpacing;
+	_: "=;";
+};
+
+# Set keys are restricted to scalar (comparable) values.
+# Dict, List, and nested Set are excluded because they are not comparable
+# and cannot serve as Go map keys.
+def SetaySetKey
+{
+	_: SetayVarRef
+	   or SetayUtcTs
+	   or SetayTrue or SetayFalse or SetayNull
+	   or SetayNumber
+	   or SetayString;
+};
 
 # ======================================================================
 #  Dict { ... }
