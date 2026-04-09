@@ -72,24 +72,14 @@ type PackratParser struct {
 	memoCount   int
 	furthestPos int    // furthest position reached during parsing
 	furthestMsg string // error message at the furthest position
-	lineOffsets []int  // positions of each '\n' in input (pre-computed)
 }
 
 // NewPackratParser creates a new parser.
 func NewPackratParser(input string) *PackratParser {
-	runes := []rune(input)
-	// Pre-compute line offset table: record position of every '\n'.
-	var offsets []int
-	for i, r := range runes {
-		if r == '\n' {
-			offsets = append(offsets, i)
-		}
-	}
 	return &PackratParser{
-		input:       runes,
+		input:       []rune(input),
 		memo:        make(map[string]map[int]*memoEntry),
 		furthestPos: -1,
-		lineOffsets: offsets,
 	}
 }
 
@@ -135,17 +125,13 @@ func (p *PackratParser) getMemo(rule string, pos int) (*memoEntry, bool) {
 }
 
 func (p *PackratParser) lineAt(pos int) LineNum {
-	// Binary search: find how many '\n' characters appear before pos.
-	lo, hi := 0, len(p.lineOffsets)
-	for lo < hi {
-		mid := lo + (hi-lo)/2
-		if p.lineOffsets[mid] < pos {
-			lo = mid + 1
-		} else {
-			hi = mid
+	line := LineNum(1)
+	for i := 0; i < pos && i < len(p.input); i++ {
+		if p.input[i] == '\n' {
+			line++
 		}
 	}
-	return LineNum(lo + 1)
+	return line
 }
 
 func (p *PackratParser) makeAuthority(start, end int) *Authority {
@@ -403,6 +389,14 @@ type DefSetayDqNormalChar struct {
 }
 
 func (n *DefSetayDqNormalChar) GetAuthority() *Authority { return n.Authority }
+
+// DefSetayDqDollarChar is the parse result of the SetayDqDollarChar rule.
+type DefSetayDqDollarChar struct {
+	Authority *Authority
+	AnonymousField1 StringFromSource
+}
+
+func (n *DefSetayDqDollarChar) GetAuthority() *Authority { return n.Authority }
 
 // DefSetaySqString is the parse result of the SetaySqString rule.
 type DefSetaySqString struct {
@@ -719,6 +713,56 @@ type DefSetayMultiLineCommentNormalChar struct {
 
 func (n *DefSetayMultiLineCommentNormalChar) GetAuthority() *Authority { return n.Authority }
 
+// DefSetayVarRef is the parse result of the SetayVarRef rule.
+type DefSetayVarRef struct {
+	Authority *Authority
+	AnonymousField1 StringFromSource
+	AnonymousField2 *DefSetaySpacing
+	Expr *DefSetayVarExpr
+	AnonymousField3 *DefSetaySpacing
+	AnonymousField4 StringFromSource
+}
+
+func (n *DefSetayVarRef) GetAuthority() *Authority { return n.Authority }
+
+// DefSetayVarExpr is the parse result of the SetayVarExpr rule.
+type DefSetayVarExpr struct {
+	Authority *Authority
+	VarName *DefSetayVarName
+	Fallback []*DefSetayVarFallback
+}
+
+func (n *DefSetayVarExpr) GetAuthority() *Authority { return n.Authority }
+
+// DefSetayVarName is the parse result of the SetayVarName rule.
+type DefSetayVarName struct {
+	Authority *Authority
+	FirstCh *DefSetayBareKeyLeadChar
+	Trailing []*DefSetayBareKeyTrailingPart
+}
+
+func (n *DefSetayVarName) GetAuthority() *Authority { return n.Authority }
+
+// DefSetayVarFallback is the parse result of the SetayVarFallback rule.
+type DefSetayVarFallback struct {
+	Authority *Authority
+	AnonymousField1 *DefSetaySpacing
+	AnonymousField2 StringFromSource
+	AnonymousField3 *DefSetaySpacing
+	Value *DefSetayVarOrValue
+	Next []*DefSetayVarFallback
+}
+
+func (n *DefSetayVarFallback) GetAuthority() *Authority { return n.Authority }
+
+// DefSetayVarOrValue is the parse result of the SetayVarOrValue rule.
+type DefSetayVarOrValue struct {
+	Authority *Authority
+	AnonymousField1 ParseNode
+}
+
+func (n *DefSetayVarOrValue) GetAuthority() *Authority { return n.Authority }
+
 // DefSetaySpacing is the parse result of the SetaySpacing rule.
 type DefSetaySpacing struct {
 	Authority *Authority
@@ -852,6 +896,14 @@ func (p *PackratParser) parseSetayValue(pos int) (*DefSetayValue, int, error) {
 	// Field: AnonymousField1 (Choice)
 	{
 		var choiceMatched bool
+		if !choiceMatched {
+			node, end, err := p.parseSetayVarRef(pos)
+			if err == nil {
+				result.AnonymousField1 = node
+				pos = end
+				choiceMatched = true
+			}
+		}
 		if !choiceMatched {
 			node, end, err := p.parseSetayDict(pos)
 			if err == nil {
@@ -2246,7 +2298,23 @@ func (p *PackratParser) parseSetayDqStringContent(pos int) (*DefSetayDqStringCon
 	{
 		var choiceMatched bool
 		if !choiceMatched {
+			node, end, err := p.parseSetayVarRef(pos)
+			if err == nil {
+				result.AnonymousField1 = node
+				pos = end
+				choiceMatched = true
+			}
+		}
+		if !choiceMatched {
 			node, end, err := p.parseSetayEscapeSequence(pos)
+			if err == nil {
+				result.AnonymousField1 = node
+				pos = end
+				choiceMatched = true
+			}
+		}
+		if !choiceMatched {
+			node, end, err := p.parseSetayDqDollarChar(pos)
 			if err == nil {
 				result.AnonymousField1 = node
 				pos = end
@@ -2299,6 +2367,7 @@ func (p *PackratParser) parseSetayDqNormalChar(pos int) (*DefSetayDqNormalChar, 
 		excluded := false
 		if ch == '"' { excluded = true }
 		if ch == '\\' { excluded = true }
+		if ch == '$' { excluded = true }
 		if excluded {
 			err := fmt.Errorf("line %d: char %q is in excluded set", p.lineAt(pos), string(ch))
 			p.memoize("SetayDqNormalChar", startPos, nil, pos, err)
@@ -2309,6 +2378,59 @@ func (p *PackratParser) parseSetayDqNormalChar(pos int) (*DefSetayDqNormalChar, 
 	}
 	result.Authority = p.makeAuthority(startPos, pos)
 	p.memoize("SetayDqNormalChar", startPos, result, pos, nil)
+	return result, pos, nil
+}
+
+func (p *PackratParser) parseSetayDqDollarChar(pos int) (*DefSetayDqDollarChar, int, error) {
+	if m, ok := p.getMemo("SetayDqDollarChar", pos); ok {
+		if m.err != nil {
+			return nil, m.end, m.err
+		}
+		return m.node.(*DefSetayDqDollarChar), m.end, nil
+	}
+
+	if err := p.enterRule(); err != nil {
+		return nil, pos, err
+	}
+	defer p.leaveRule()
+
+	startPos := pos
+	result := &DefSetayDqDollarChar{}
+
+	// Field: AnonymousField1 (Literal "$")
+	{
+		expected := []rune("$")
+		if pos+len(expected) > len(p.input) {
+			err := fmt.Errorf("line %d: expected %q, got EOF", p.lineAt(pos), "$")
+			p.memoize("SetayDqDollarChar", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+		matched := true
+		for i, r := range expected {
+			if p.input[pos+i] != r { matched = false; break }
+		}
+		if !matched {
+			err := fmt.Errorf("line %d: expected %q", p.lineAt(pos), "$")
+			p.memoize("SetayDqDollarChar", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+		result.AnonymousField1 = p.makeStringFromSource(pos, pos+len(expected))
+		pos += len(expected)
+	}
+	// Field: AnonymousField2 (NotFollowedBy)
+	{
+		if pos < len(p.input) {
+			ch := p.input[pos]
+			if ch == '{' {
+				err := fmt.Errorf("line %d: notFollowedBy matched (got %q)", p.lineAt(pos), string(ch))
+				p.memoize("SetayDqDollarChar", startPos, nil, pos, err)
+				return nil, pos, err
+			}
+		}
+		// notFollowedBy succeeded: pos unchanged
+	}
+	result.Authority = p.makeAuthority(startPos, pos)
+	p.memoize("SetayDqDollarChar", startPos, result, pos, nil)
 	return result, pos, nil
 }
 
@@ -4774,6 +4896,334 @@ func (p *PackratParser) parseSetayMultiLineCommentNormalChar(pos int) (*DefSetay
 	}
 	result.Authority = p.makeAuthority(startPos, pos)
 	p.memoize("SetayMultiLineCommentNormalChar", startPos, result, pos, nil)
+	return result, pos, nil
+}
+
+func (p *PackratParser) parseSetayVarRef(pos int) (*DefSetayVarRef, int, error) {
+	if m, ok := p.getMemo("SetayVarRef", pos); ok {
+		if m.err != nil {
+			return nil, m.end, m.err
+		}
+		return m.node.(*DefSetayVarRef), m.end, nil
+	}
+
+	if err := p.enterRule(); err != nil {
+		return nil, pos, err
+	}
+	defer p.leaveRule()
+
+	startPos := pos
+	result := &DefSetayVarRef{}
+
+	// Field: AnonymousField1 (Literal "${")
+	{
+		expected := []rune("${")
+		if pos+len(expected) > len(p.input) {
+			err := fmt.Errorf("line %d: expected %q, got EOF", p.lineAt(pos), "${")
+			p.memoize("SetayVarRef", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+		matched := true
+		for i, r := range expected {
+			if p.input[pos+i] != r { matched = false; break }
+		}
+		if !matched {
+			err := fmt.Errorf("line %d: expected %q", p.lineAt(pos), "${")
+			p.memoize("SetayVarRef", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+		result.AnonymousField1 = p.makeStringFromSource(pos, pos+len(expected))
+		pos += len(expected)
+	}
+	// Field: AnonymousField2 (Reference -> SetaySpacing)
+	{
+		node, end, err := p.parseSetaySpacing(pos)
+		if err != nil {
+			p.memoize("SetayVarRef", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+		result.AnonymousField2 = node
+		pos = end
+	}
+	// Field: Expr (Reference -> SetayVarExpr)
+	{
+		node, end, err := p.parseSetayVarExpr(pos)
+		if err != nil {
+			p.memoize("SetayVarRef", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+		result.Expr = node
+		pos = end
+	}
+	// Field: AnonymousField3 (Reference -> SetaySpacing)
+	{
+		node, end, err := p.parseSetaySpacing(pos)
+		if err != nil {
+			p.memoize("SetayVarRef", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+		result.AnonymousField3 = node
+		pos = end
+	}
+	// Field: AnonymousField4 (Literal "}")
+	{
+		expected := []rune("}")
+		if pos+len(expected) > len(p.input) {
+			err := fmt.Errorf("line %d: expected %q, got EOF", p.lineAt(pos), "}")
+			p.memoize("SetayVarRef", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+		matched := true
+		for i, r := range expected {
+			if p.input[pos+i] != r { matched = false; break }
+		}
+		if !matched {
+			err := fmt.Errorf("line %d: expected %q", p.lineAt(pos), "}")
+			p.memoize("SetayVarRef", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+		result.AnonymousField4 = p.makeStringFromSource(pos, pos+len(expected))
+		pos += len(expected)
+	}
+	result.Authority = p.makeAuthority(startPos, pos)
+	p.memoize("SetayVarRef", startPos, result, pos, nil)
+	return result, pos, nil
+}
+
+func (p *PackratParser) parseSetayVarExpr(pos int) (*DefSetayVarExpr, int, error) {
+	if m, ok := p.getMemo("SetayVarExpr", pos); ok {
+		if m.err != nil {
+			return nil, m.end, m.err
+		}
+		return m.node.(*DefSetayVarExpr), m.end, nil
+	}
+
+	if err := p.enterRule(); err != nil {
+		return nil, pos, err
+	}
+	defer p.leaveRule()
+
+	startPos := pos
+	result := &DefSetayVarExpr{}
+
+	// Field: VarName (Reference -> SetayVarName)
+	{
+		node, end, err := p.parseSetayVarName(pos)
+		if err != nil {
+			p.memoize("SetayVarExpr", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+		result.VarName = node
+		pos = end
+	}
+	// Field: Fallback (Repeat)
+	{
+		var repCount int
+		for {
+			repCount++
+			if repCount > MaxRepeatCount { return nil, pos, ErrRepeatLimitExceeded }
+			node, end, err := p.parseSetayVarFallback(pos)
+			if err != nil { break }
+			if end == pos { break } // prevent zero-length match
+			result.Fallback = append(result.Fallback, node)
+			pos = end
+			if len(result.Fallback) >= 1 { break }
+		}
+	}
+	result.Authority = p.makeAuthority(startPos, pos)
+	p.memoize("SetayVarExpr", startPos, result, pos, nil)
+	return result, pos, nil
+}
+
+func (p *PackratParser) parseSetayVarName(pos int) (*DefSetayVarName, int, error) {
+	if m, ok := p.getMemo("SetayVarName", pos); ok {
+		if m.err != nil {
+			return nil, m.end, m.err
+		}
+		return m.node.(*DefSetayVarName), m.end, nil
+	}
+
+	if err := p.enterRule(); err != nil {
+		return nil, pos, err
+	}
+	defer p.leaveRule()
+
+	startPos := pos
+	result := &DefSetayVarName{}
+
+	// Field: FirstCh (Reference -> SetayBareKeyLeadChar)
+	{
+		node, end, err := p.parseSetayBareKeyLeadChar(pos)
+		if err != nil {
+			p.memoize("SetayVarName", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+		result.FirstCh = node
+		pos = end
+	}
+	// Field: Trailing (Repeat)
+	{
+		var repCount int
+		for {
+			repCount++
+			if repCount > MaxRepeatCount { return nil, pos, ErrRepeatLimitExceeded }
+			node, end, err := p.parseSetayBareKeyTrailingPart(pos)
+			if err != nil { break }
+			if end == pos { break } // prevent zero-length match
+			result.Trailing = append(result.Trailing, node)
+			pos = end
+			if len(result.Trailing) >= 1 { break }
+		}
+	}
+	result.Authority = p.makeAuthority(startPos, pos)
+	p.memoize("SetayVarName", startPos, result, pos, nil)
+	return result, pos, nil
+}
+
+func (p *PackratParser) parseSetayVarFallback(pos int) (*DefSetayVarFallback, int, error) {
+	if m, ok := p.getMemo("SetayVarFallback", pos); ok {
+		if m.err != nil {
+			return nil, m.end, m.err
+		}
+		return m.node.(*DefSetayVarFallback), m.end, nil
+	}
+
+	if err := p.enterRule(); err != nil {
+		return nil, pos, err
+	}
+	defer p.leaveRule()
+
+	startPos := pos
+	result := &DefSetayVarFallback{}
+
+	// Field: AnonymousField1 (Reference -> SetaySpacing)
+	{
+		node, end, err := p.parseSetaySpacing(pos)
+		if err != nil {
+			p.memoize("SetayVarFallback", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+		result.AnonymousField1 = node
+		pos = end
+	}
+	// Field: AnonymousField2 (Literal "?:")
+	{
+		expected := []rune("?:")
+		if pos+len(expected) > len(p.input) {
+			err := fmt.Errorf("line %d: expected %q, got EOF", p.lineAt(pos), "?:")
+			p.memoize("SetayVarFallback", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+		matched := true
+		for i, r := range expected {
+			if p.input[pos+i] != r { matched = false; break }
+		}
+		if !matched {
+			err := fmt.Errorf("line %d: expected %q", p.lineAt(pos), "?:")
+			p.memoize("SetayVarFallback", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+		result.AnonymousField2 = p.makeStringFromSource(pos, pos+len(expected))
+		pos += len(expected)
+	}
+	// Field: AnonymousField3 (Reference -> SetaySpacing)
+	{
+		node, end, err := p.parseSetaySpacing(pos)
+		if err != nil {
+			p.memoize("SetayVarFallback", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+		result.AnonymousField3 = node
+		pos = end
+	}
+	// Field: Value (Reference -> SetayVarOrValue)
+	{
+		node, end, err := p.parseSetayVarOrValue(pos)
+		if err != nil {
+			p.memoize("SetayVarFallback", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+		result.Value = node
+		pos = end
+	}
+	// Field: Next (Repeat)
+	{
+		var repCount int
+		for {
+			repCount++
+			if repCount > MaxRepeatCount { return nil, pos, ErrRepeatLimitExceeded }
+			node, end, err := p.parseSetayVarFallback(pos)
+			if err != nil { break }
+			if end == pos { break } // prevent zero-length match
+			result.Next = append(result.Next, node)
+			pos = end
+			if len(result.Next) >= 1 { break }
+		}
+	}
+	result.Authority = p.makeAuthority(startPos, pos)
+	p.memoize("SetayVarFallback", startPos, result, pos, nil)
+	return result, pos, nil
+}
+
+func (p *PackratParser) parseSetayVarOrValue(pos int) (*DefSetayVarOrValue, int, error) {
+	if m, ok := p.getMemo("SetayVarOrValue", pos); ok {
+		if m.err != nil {
+			return nil, m.end, m.err
+		}
+		return m.node.(*DefSetayVarOrValue), m.end, nil
+	}
+
+	if err := p.enterRule(); err != nil {
+		return nil, pos, err
+	}
+	defer p.leaveRule()
+
+	startPos := pos
+	result := &DefSetayVarOrValue{}
+
+	// Field: AnonymousField1 (Choice)
+	{
+		var choiceMatched bool
+		if !choiceMatched {
+			node, end, err := p.parseSetayVarRef(pos)
+			if err == nil {
+				result.AnonymousField1 = node
+				pos = end
+				choiceMatched = true
+			}
+		}
+		if !choiceMatched {
+			node, end, err := p.parseSetayVarName(pos)
+			if err == nil {
+				result.AnonymousField1 = node
+				pos = end
+				choiceMatched = true
+			}
+		}
+		if !choiceMatched {
+			node, end, err := p.parseSetayNumber(pos)
+			if err == nil {
+				result.AnonymousField1 = node
+				pos = end
+				choiceMatched = true
+			}
+		}
+		if !choiceMatched {
+			node, end, err := p.parseSetayString(pos)
+			if err == nil {
+				result.AnonymousField1 = node
+				pos = end
+				choiceMatched = true
+			}
+		}
+		if !choiceMatched {
+			err := fmt.Errorf("line %d: no choice matched for field AnonymousField1", p.lineAt(pos))
+			p.memoize("SetayVarOrValue", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+	}
+	result.Authority = p.makeAuthority(startPos, pos)
+	p.memoize("SetayVarOrValue", startPos, result, pos, nil)
 	return result, pos, nil
 }
 

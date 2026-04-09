@@ -121,7 +121,70 @@ As a special case, `#!` is a reserved expression that causes the rest of the lin
 - Multi-line comments do not nest by default.
   - Implementations may optionally support nesting, but the standard does not define how opening/closing markers inside string-like content within comments should be handled.
 
-# 5. Example
+# 5. Variable References
+
+At unmarshal time, `${VAR_NAME}` expressions are replaced with a resolved value.
+
+## 5.1 Basic Syntax
+
+```setay
+{
+	redis-host = ${REDIS_HOST};
+	db-port    = ${MYSQL_PORT ?: 13306};
+	greeting   = "Hello, ${USER_NAME ?: 'World'}!";
+	password   = ${PASS1 ?: PASS2 ?: "default-secret"};
+}
+```
+
+## 5.2 Variable Name Rules
+
+Variable names follow the same character rules as bare keys:
+- First character: `[a-zA-Z_]`
+- Subsequent characters: `[a-zA-Z0-9_-]`
+- Last character: `[a-zA-Z0-9_]` (no trailing hyphen)
+
+## 5.3 Fallback Values (`?:`)
+
+If a variable is not defined, a fallback value after `?:` is used instead:
+
+```setay
+port    = ${PORT ?: 8080};        # integer literal fallback
+mode    = ${MODE ?: "production"}; # string literal fallback
+backup  = ${A ?: B ?: "final"};   # chained fallbacks
+```
+
+Fallback values can be:
+- **Another variable name** — resolved recursively (without `${}`)
+- **An integer or float literal** — used as a string when the target type requires it
+- **A single- or double-quoted string literal**
+
+## 5.4 String Interpolation
+
+Inside **double-quoted strings**, `${VAR}` is expanded in place:
+
+```setay
+message = "Hello, ${NAME ?: 'stranger'}! Port is ${PORT ?: 8080}.";
+```
+
+Rules:
+- String interpolation works **only** inside double-quoted strings (`"..."`)
+- Single-quoted strings (`'...'`) are always literal — `${VAR}` inside them is not expanded
+- A `$` not followed by `{` is treated as a literal `$` character (e.g. `"price: $100"`)
+
+## 5.5 Resolution Order
+
+The following sources are tried in order:
+
+1. **Custom resolver** (registered via `RegisterVariableResolver`), if it returns `ok=true`
+2. **Environment variable** (`os.LookupEnv`) — when no resolver is registered, or the resolver returns `ok=false`
+3. **`?:` fallback** — when neither source resolves the variable
+4. **Parse error** — when no fallback is provided and the variable is undefined
+
+## 5.6 Unmarshal-Only
+
+Variable references are an **unmarshal-only** feature. `Marshal` (Go → setay) always writes concrete values.
+
+# 6. Example
 
 ```setay
 #!/bin/setay
@@ -150,7 +213,7 @@ As a special case, `#!` is a reserved expression that causes the rest of the lin
 }
 ```
 
-# 6. Standard Style
+# 7. Standard Style
 
 - Indentation uses horizontal tabs by default.
   - However, spaces are used for alignment after the first non-tab character on a line.
@@ -183,7 +246,7 @@ As a special case, `#!` is a reserved expression that causes the rest of the lin
 }
 ```
 
-# 7. String Escape Sequences
+# 8. String Escape Sequences
 
 - `\` is used as the escape character.
 - To represent `\` itself, use `\\`.
@@ -346,7 +409,70 @@ setay はシェルではないので shebang の意味を解釈しません。
 - 複数行コメントはネストできない解釈を標準とします。
 	- 処理系は任意でネストする形式をサポートしてもよいですが、コメント内の文字列に見える部分の開始/終了マークをどう解釈するかなどの答えを標準は提供しません。
 
-# 5. 具体的な記述例
+# 5. 変数参照
+
+アンマーシャル時に、`${VAR_NAME}` 式が解決された値で置き換えられます。
+
+## 5.1 基本構文
+
+```setay
+{
+	redis-host = ${REDIS_HOST};
+	db-port    = ${MYSQL_PORT ?: 13306};
+	greeting   = "Hello, ${USER_NAME ?: 'World'}!";
+	password   = ${PASS1 ?: PASS2 ?: "default-secret"};
+}
+```
+
+## 5.2 変数名のルール
+
+変数名はベアキーと同じ文字規則に従います：
+- 先頭文字：`[a-zA-Z_]`
+- 2文字目以降：`[a-zA-Z0-9_-]`
+- 末尾文字：`[a-zA-Z0-9_]`（ハイフン不可）
+
+## 5.3 フォールバック値 (`?:`)
+
+変数が未定義の場合、`?:` 以降のフォールバック値が使われます：
+
+```setay
+port   = ${PORT ?: 8080};         # 整数リテラルのフォールバック
+mode   = ${MODE ?: "production"};  # 文字列リテラルのフォールバック
+backup = ${A ?: B ?: "final"};    # フォールバックのチェーン
+```
+
+フォールバック値として指定できるもの：
+- **別の変数名** — 再帰的に解決される（`${}` なしで記述）
+- **整数または浮動小数点のリテラル** — 型変換が必要な場合は文字列として使用される
+- **シングルまたはダブルクォートの文字列リテラル**
+
+## 5.4 文字列補間
+
+**ダブルクォート文字列** 内では `${VAR}` がその場で展開されます：
+
+```setay
+message = "Hello, ${NAME ?: 'stranger'}! Port is ${PORT ?: 8080}.";
+```
+
+ルール：
+- 文字列補間は **ダブルクォート文字列**（`"..."`）内でのみ機能する
+- シングルクォート文字列（`'...'`）は常にリテラル — `${VAR}` は展開されない
+- `${` が続かない `$` は文字リテラルとして扱われる（例：`"price: $100"`）
+
+## 5.5 解決の優先順位
+
+以下のソースを順番に試みます：
+
+1. **カスタムリゾルバー**（`RegisterVariableResolver` で登録済み）が `ok=true` を返した場合
+2. **環境変数**（`os.LookupEnv`）— リゾルバー未登録、または `ok=false` を返した場合
+3. **`?:` フォールバック** — いずれのソースでも解決できない場合
+4. **パースエラー** — フォールバックが指定されておらず変数が未定義の場合
+
+## 5.6 アンマーシャル専用
+
+変数参照は **アンマーシャル専用** の機能です。`Marshal`（Go → setay）は常に具体的な値を書き出します。
+
+# 6. 具体的な記述例
 
 ```setay
 #!/bin/setay
@@ -375,7 +501,7 @@ setay はシェルではないので shebang の意味を解釈しません。
 }
 ```
 
-# 6. 標準のスタイル
+# 7. 標準のスタイル
 
 - インデントには原則として水平タブを用います。
 	- ただし、行頭から一度でも水平タブ以外の文字が出現した後のレイアウトには空白を用います。
@@ -408,7 +534,7 @@ setay はシェルではないので shebang の意味を解釈しません。
 }
 ```
 
-# 7. 文字列内のエスケープ記法
+# 8. 文字列内のエスケープ記法
 
 - `\` をエスケープ用の文字として使用します。
 - `\` 自体を表したい場合には `\\` のように二重にする事で表現できます。

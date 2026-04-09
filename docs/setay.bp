@@ -17,7 +17,8 @@ root-def SetayDocument
 
 def SetayValue
 {
-	_: SetayDict or SetayList
+	_: SetayVarRef
+	   or SetayDict or SetayList
 	   or SetayUtcTs
 	   or SetayTrue or SetayFalse or SetayNull
 	   or SetayNumber
@@ -178,13 +179,21 @@ def SetayDqString
 
 def SetayDqStringContent
 {
-	_: SetayEscapeSequence or SetayDqNormalChar;
+	_: SetayVarRef or SetayEscapeSequence or SetayDqDollarChar or SetayDqNormalChar;
 };
 
-# Any character except '"' and '\'.
+# Any character except '"', '\', and '$'.
+# '$' is excluded here so that '${' can be parsed as SetayVarRef.
 def SetayDqNormalChar
 {
-	_: anychar-except<'"' or '\\'>;
+	_: anychar-except<'"' or '\\' or '$'>;
+};
+
+# A bare '$' not followed by '{': treated as a literal '$'.
+def SetayDqDollarChar
+{
+	_: '$';
+	_: not-followed-by<'{'>;
 };
 
 # --- Single-quoted string '...' ---
@@ -458,6 +467,53 @@ def SetayMultiLineCommentBrace
 def SetayMultiLineCommentNormalChar
 {
 	_: anychar-except<'}'>;
+};
+
+# ======================================================================
+#  Variable Reference  ${VAR_NAME ?: fallback}
+# ======================================================================
+
+# Top-level variable reference: ${ expr }
+def SetayVarRef
+{
+	_: "${";
+	_: SetaySpacing;
+	expr: SetayVarExpr;
+	_: SetaySpacing;
+	_: '}';
+};
+
+# Variable expression: a variable name with an optional fallback chain.
+def SetayVarExpr
+{
+	varName: SetayVarName;
+	fallback: zero-or-one<SetayVarFallback>;
+};
+
+# Variable name: same rules as a bare key.
+# (Backtick syntax is NOT supported; use string interpolation instead.)
+def SetayVarName
+{
+	firstCh: SetayBareKeyLeadChar;
+	trailing: zero-or-one<SetayBareKeyTrailingPart>;
+};
+
+# Fallback chain: ?: value  (can nest recursively for chaining)
+def SetayVarFallback
+{
+	_: SetaySpacing;
+	_: "?:";
+	_: SetaySpacing;
+	value: SetayVarOrValue;
+	next: zero-or-one<SetayVarFallback>;
+};
+
+# A fallback value: either another variable reference, a bare variable name,
+# or a literal value (number or string).
+# SetayVarName must come BEFORE SetayNumber/SetayString to avoid ambiguity.
+def SetayVarOrValue
+{
+	_: SetayVarRef or SetayVarName or SetayNumber or SetayString;
 };
 
 # ======================================================================

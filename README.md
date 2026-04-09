@@ -15,6 +15,7 @@ Setay is a human-friendly data serialization format designed for configuration f
 - **`encoding/json`-style API** — `Marshal`, `Unmarshal`, `MarshalFile`, `UnmarshalFile`
 - **Struct tags** — `setay:"name,omitempty"`, `setay:"-"`
 - **Rich data types** — strings, integers (decimal/hex/binary/octal), floats, booleans, null, `UtcTs` timestamps
+- **Variable references** — `${VAR_NAME}` syntax resolves environment variables or custom resolver values at unmarshal time, with `?:` fallback chains and string interpolation
 - **[wantai](https://github.com/aki-kuramoto/wantai) integration** — Native support for wantai's typed UTC timestamp wrappers
 - **CLI formatter** — `setay fmt` to format `.setay` files in the standard style
 
@@ -106,6 +107,76 @@ setay.MarshalFile("config.setay", cfg)
 var loaded Config
 setay.UnmarshalFile("config.setay", &loaded)
 ```
+
+## Variable References
+
+At unmarshal time, `${VAR_NAME}` is replaced with the value of the named variable. By default, variables are resolved from the process's environment (via `os.LookupEnv`). You can also register a custom resolver to source values from a database, secrets manager, or any other location.
+
+### Syntax
+
+```setay
+{
+	# Simple environment variable reference
+	redis-host = ${REDIS_HOST};
+
+	# With a fallback value (used when the variable is not set)
+	db-port = ${MYSQL_PORT ?: 13306};
+
+	# String interpolation (variable expanded inside a double-quoted string)
+	greeting = "Hello, ${USER_NAME ?: 'World'}!";
+
+	# Fallback chain — tries each variable in turn, then the literal
+	password = ${PASS_PRIMARY ?: PASS_SECONDARY ?: "default-secret"};
+}
+```
+
+**Key rules:**
+
+- `${VAR_NAME}` — refers to a variable by name (bare identifier, same rules as a bare key)
+- `?: value` — fallback if the variable is not defined; can chain: `?: A ?: B ?: "final"`
+- Fallback values can be: another variable name, an integer/float literal, a quoted string
+- String interpolation works **only** inside double-quoted strings (`"..."`); single-quoted strings (`'...'`) are always literal
+- A bare `$` not followed by `{` is treated as a literal `$` character
+- Variable references are an **unmarshal-only** feature; `Marshal` always outputs concrete values
+
+### Resolution Priority
+
+1. **Custom resolver** (if registered and returns `ok=true`)
+2. **Environment variable** (`os.LookupEnv`) — used when no resolver is registered, or resolver returns `ok=false`
+3. **`?:` fallback value** — used when the variable is not found by either source
+4. **Error** — returned if the variable is not found and no fallback is specified
+
+### Custom Resolver
+
+```go
+import setay "github.com/aki-kuramoto/setay-go"
+
+// Register a custom resolver (called before os.LookupEnv).
+// Return ok=true to use result, ok=false to fall through to os.LookupEnv.
+// Return a non-nil error to abort Unmarshal immediately.
+setay.RegisterVariableResolver(func(name string) (result string, ok bool, err error) {
+	result, ok = mySecretStore.Get(name)
+	return result, ok, nil
+})
+
+// Reset to default (env-only) behavior:
+setay.RegisterVariableResolver(nil)
+```
+
+### Type Coercion
+
+Resolved variable values are always strings (from env or the resolver). setay automatically converts them to the target field's type:
+
+| Target type | Conversion |
+|---|---|
+| `string` | Used as-is |
+| `int`, `int64`, … | Parsed as an integer (supports `0x`, `0b`, `0o` prefixes) |
+| `uint`, `uint32`, … | Parsed as an unsigned integer |
+| `float32`, `float64` | Parsed as a floating-point number |
+| `bool` | `"true"`, `"1"`, `"yes"` → `true`; `"false"`, `"0"`, `"no"`, `""` → `false` |
+| `interface{}` | Stored as a `string` |
+| `*T` | Pointer is allocated, then the value is coerced to `T` |
+
 ## Timestamps with [wantai](https://github.com/aki-kuramoto/wantai)
 
 setay-go natively supports [wantai](https://github.com/aki-kuramoto/wantai)'s typed UTC timestamp wrappers. Use any wantai timestamp type (`UtcNanoTs`, `UtcMicroTs`, `UtcMilliTs`, `UtcSecTsS32`, etc.) in your struct fields — they will be automatically marshaled to/from `UtcTs("...")` in setay format.
@@ -185,6 +256,7 @@ The top level of a setay document is always a dict `{ ... }`. Dicts hold key–v
 | Float | `3.14`, `-0.5`, `1.5e10` |
 | String | `"hello"`, `'world'` |
 | UTC Timestamp | `UtcTs("2026-01-02 15:04:05")` |
+| Variable Reference | `${MY_VAR}`, `${PORT ?: 8080}` |
 
 ### Comments
 
@@ -218,6 +290,7 @@ setay は設定ファイルや構造化データの保存を目的に設計さ�
 - **`encoding/json` スタイルの API** — `Marshal`, `Unmarshal`, `MarshalFile`, `UnmarshalFile`
 - **構造体タグ** — `setay:"name,omitempty"`, `setay:"-"`
 - **豊富なデータ型** — 文字列、整数（10進/16進/2進/8進）、浮動小数点、真偽値、null、`UtcTs` タイムスタンプ
+- **変数参照** — `${VAR_NAME}` 構文でアンマーシャル時に環境変数やカスタムリゾルバーから値を解決。`?:` フォールバックチェーンと文字列補間に対応
 - **[wantai](https://github.com/aki-kuramoto/wantai) 連携** — wantai の型付き UTC タイムスタンプラッパーをネイティブサポート
 - **CLI フォーマッター** — `setay fmt` で `.setay` ファイルを標準スタイルに整形
 
@@ -310,6 +383,75 @@ var loaded Config
 setay.UnmarshalFile("config.setay", &loaded)
 ```
 
+## 変数参照
+
+アンマーシャル時に `${VAR_NAME}` が変数名に対応する値で置き換えられます。デフォルトではプロセスの環境変数（`os.LookupEnv`）から解決します。データベース・シークレットマネージャーなど独自のソースから値を提供したい場合は、カスタムリゾルバーを登録できます。
+
+### 構文
+
+```setay
+{
+	# シンプルな環境変数参照
+	redis-host = ${REDIS_HOST};
+
+	# フォールバック値付き（変数が未定義の場合に使用）
+	db-port = ${MYSQL_PORT ?: 13306};
+
+	# 文字列補間（ダブルクォート文字列内で変数を展開）
+	greeting = "Hello, ${USER_NAME ?: 'World'}!";
+
+	# フォールバックチェーン — 順番に変数を試し、最後にリテラル
+	password = ${PASS_PRIMARY ?: PASS_SECONDARY ?: "default-secret"};
+}
+```
+
+**主なルール：**
+
+- `${VAR_NAME}` — 変数名（ベアキーと同じ文字規則の識別子）で変数を参照
+- `?: value` — 変数が未定義の場合のフォールバック。チェーン可能: `?: A ?: B ?: "final"`
+- フォールバック値の種類: 別の変数名、整数/浮動小数点リテラル、クォートされた文字列
+- 文字列補間は **ダブルクォート文字列**（`"..."`）内でのみ機能。シングルクォート文字列（`'...'`）は常にリテラル
+- `${` が続かない裸の `$` は文字リテラルとして扱われる
+- 変数参照は **アンマーシャル専用** の機能。`Marshal` は常に具体的な値を出力する
+
+### 解決の優先順位
+
+1. **カスタムリゾルバー**（登録済みで `ok=true` を返した場合）
+2. **環境変数**（`os.LookupEnv`）— リゾルバー未登録、または `ok=false` を返した場合
+3. **`?:` フォールバック値** — いずれのソースでも見つからなかった場合
+4. **エラー** — 変数が見つからずフォールバックも指定されていない場合
+
+### カスタムリゾルバー
+
+```go
+import setay "github.com/aki-kuramoto/setay-go"
+
+// カスタムリゾルバーを登録する（os.LookupEnv より先に呼ばれる）。
+// ok=true を返すとその値を使用、ok=false を返すと os.LookupEnv にフォールバック。
+// error を返すと Unmarshal が即座にそのエラーを返す。
+setay.RegisterVariableResolver(func(name string) (result string, ok bool, err error) {
+	result, ok = mySecretStore.Get(name)
+	return result, ok, nil
+})
+
+// デフォルト（環境変数のみ）に戻す：
+setay.RegisterVariableResolver(nil)
+```
+
+### 型への変換
+
+解決された変数値は常に文字列で、setay がターゲットフィールドの型に自動変換します：
+
+| 変換先の型 | 変換方法 |
+|---|---|
+| `string` | そのまま使用 |
+| `int`, `int64`, … | 整数としてパース（`0x`, `0b`, `0o` プリフィックス対応） |
+| `uint`, `uint32`, … | 符号なし整数としてパース |
+| `float32`, `float64` | 浮動小数点数としてパース |
+| `bool` | `"true"`, `"1"`, `"yes"` → `true`；`"false"`, `"0"`, `"no"`, `""` → `false` |
+| `interface{}` | `string` として格納 |
+| `*T` | ポインタを確保し、`T` として変換 |
+
 ## タイムスタンプと [wantai](https://github.com/aki-kuramoto/wantai)
 
 setay-go は [wantai](https://github.com/aki-kuramoto/wantai) の型付き UTC タイムスタンプラッパーをネイティブサポートしています。構造体フィールドに wantai のタイムスタンプ型（`UtcNanoTs`、`UtcMicroTs`、`UtcMilliTs`、`UtcSecTsS32` 等）を使用すると、setay 形式の `UtcTs("...")` との間で自動的に変換されます。
@@ -389,6 +531,7 @@ setay ドキュメントのトップレベルは常にディクト `{ ... }` で
 | 浮動小数点 | `3.14`, `-0.5`, `1.5e10` |
 | 文字列 | `"hello"`, `'world'` |
 | UTC タイムスタンプ | `UtcTs("2026-01-02 15:04:05")` |
+| 変数参照 | `${MY_VAR}`, `${PORT ?: 8080}` |
 
 ### コメント
 

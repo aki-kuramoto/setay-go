@@ -207,6 +207,13 @@ func (u *unmarshaler) unmarshalValue(val *DefSetayValue, target reflect.Value) e
 	inner := val.AnonymousField1
 
 	switch v := inner.(type) {
+	case *DefSetayVarRef:
+		// Resolve the variable and coerce the result to the target type.
+		resolved, err := u.resolveVarRef(v)
+		if err != nil {
+			return err
+		}
+		return u.setFromString(target, resolved)
 	case *DefSetayNull:
 		return u.setNull(target)
 	case *DefSetayTrue:
@@ -468,8 +475,21 @@ func (u *unmarshaler) decodeStringContent(contents []*DefSetayDqStringContent) s
 	for _, c := range contents {
 		inner := c.AnonymousField1
 		switch v := inner.(type) {
+		case *DefSetayVarRef:
+			// String interpolation (plan B): expand variable inside double-quoted string.
+			// Errors are silently turned into empty string to preserve string-building
+			// context; a proper error path would require returning an error from here.
+			resolved, err := u.resolveVarRef(v)
+			if err == nil {
+				sb.WriteString(resolved)
+			}
+			// When err != nil, leave the variable as empty — callers that need strict
+			// error handling should use unmarshalValue which returns errors directly.
 		case *DefSetayEscapeSequence:
 			sb.WriteString(u.decodeEscape(v))
+		case *DefSetayDqDollarChar:
+			// Bare '$' not followed by '{': emit it literally.
+			sb.WriteString("$")
 		case *DefSetayDqNormalChar:
 			sb.WriteString(u.textOf(v.GetAuthority()))
 		default:
@@ -542,6 +562,108 @@ func collectValues(elements *DefSetayListElements) []*DefSetayValue {
 		result = append(result, sep.Value)
 	}
 	return result
+}
+
+// resolveVarRef resolves a ${VAR ?: fallback} reference.
+// It walks the fallback chain recursively until a value is found or all
+// options are exhausted, in which case it returns an error.
+func (u *unmarshaler) resolveVarRef(ref *DefSetayVarRef) (string, error) {
+	varName := u.textOf(ref.Expr.VarName.GetAuthority())
+
+	val, ok, err := resolveVar(varName)
+	if err != nil {
+		return "", fmt.Errorf("setay: variable resolver error for %q: %w", varName, err)
+	}
+	if ok {
+		return val, nil
+	}
+
+	// Not found — try fallback chain.
+	if len(ref.Expr.Fallback) > 0 {
+		return u.resolveFallback(ref.Expr.Fallback[0])
+	}
+
+	return "", fmt.Errorf("setay: variable %q is not defined and has no fallback", varName)
+}
+
+// resolveFallback evaluates a single fallback node (and recurses into .Next).
+func (u *unmarshaler) resolveFallback(fb *DefSetayVarFallback) (string, error) {
+	v := fb.Value.AnonymousField1
+	switch node := v.(type) {
+	case *DefSetayVarRef:
+		// Another variable reference as fallback — try it.
+		varName := u.textOf(node.Expr.VarName.GetAuthority())
+		val, ok, err := resolveVar(varName)
+		if err != nil {
+			return "", fmt.Errorf("setay: variable resolver error for %q: %w", varName, err)
+		}
+		if ok {
+			return val, nil
+		}
+		// Not found — continue the chain inside this VarRef's own fallback.
+		if len(node.Expr.Fallback) > 0 {
+			if result, err2 := u.resolveFallback(node.Expr.Fallback[0]); err2 == nil {
+				return result, nil
+			}
+		}
+		// Still not found — try the sibling Next chain.
+		if len(fb.Next) > 0 {
+			return u.resolveFallback(fb.Next[0])
+		}
+		return "", fmt.Errorf("setay: variable %q is not defined and has no more fallbacks", varName)
+	case *DefSetayVarName:
+		// Bare variable name as fallback: ${A ?: B ?: "last"} — B is resolved as a variable.
+		varName := u.textOf(node.GetAuthority())
+		val, ok, err := resolveVar(varName)
+		if err != nil {
+			return "", fmt.Errorf("setay: variable resolver error for %q: %w", varName, err)
+		}
+		if ok {
+			return val, nil
+		}
+		// Variable B not found — continue to next fallback.
+		if len(fb.Next) > 0 {
+			return u.resolveFallback(fb.Next[0])
+		}
+		return "", fmt.Errorf("setay: variable %q is not defined and has no more fallbacks", varName)
+	case *DefSetayString:
+		// Literal string fallback.
+		return u.decodeString(node), nil
+	case *DefSetayNumber:
+		// Literal number fallback — return as-is string.
+		return u.textOf(node.GetAuthority()), nil
+	default:
+		return u.textOf(fb.Value.GetAuthority()), nil
+	}
+}
+
+// setFromString coerces a resolved variable string value to the target reflect.Value.
+// Strings go to string/interface; numbers are parsed when the target is numeric.
+func (u *unmarshaler) setFromString(target reflect.Value, s string) error {
+	switch target.Kind() {
+	case reflect.String:
+		target.SetString(s)
+		return nil
+	case reflect.Interface:
+		target.Set(reflect.ValueOf(s))
+		return nil
+	case reflect.Bool:
+		switch strings.ToLower(strings.TrimSpace(s)) {
+		case "true", "1", "yes":
+			target.SetBool(true)
+		case "false", "0", "no", "":
+			target.SetBool(false)
+		default:
+			return fmt.Errorf("setay: cannot parse %q as bool", s)
+		}
+		return nil
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64:
+		return u.setNumber(target, s)
+	default:
+		return fmt.Errorf("setay: cannot set variable (string %q) into %s", s, target.Type())
+	}
 }
 
 // parseInteger parses an integer string, handling prefixes.

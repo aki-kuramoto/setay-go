@@ -1,11 +1,14 @@
 package setay_test
 
 import (
-	setay "github.com/aki-kuramoto/setay-go"
-	"github.com/aki-kuramoto/wantai"
+	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
+
+	setay "github.com/aki-kuramoto/setay-go"
+	"github.com/aki-kuramoto/wantai"
 )
 
 type BasicConfig struct {
@@ -441,3 +444,288 @@ func TestRoundTripWantaiTimestamp(t *testing.T) {
 			loaded.CreatedMilli.ToTime(), original.CreatedMilli.ToTime())
 	}
 }
+
+// =====================================================================
+//  Variable Reference (${VAR}) Tests
+// =====================================================================
+
+type VarConfig struct {
+	Host     string `setay:"host"`
+	Port     int    `setay:"port"`
+	Password string `setay:"password"`
+	Key      string `setay:"key"`
+	Greeting string `setay:"greeting"`
+	Debug    bool   `setay:"debug"`
+}
+
+// TestVarEnvDefault: ${VAR} resolves from environment variable.
+func TestVarEnvDefault(t *testing.T) {
+	t.Setenv("SETAY_TEST_HOST", "env-host.example.com")
+
+	input := `{ host = ${SETAY_TEST_HOST} }`
+	var cfg VarConfig
+	if err := setay.Unmarshal([]byte(input), &cfg); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if cfg.Host != "env-host.example.com" {
+		t.Errorf("Host = %q, want %q", cfg.Host, "env-host.example.com")
+	}
+}
+
+// TestVarCustomResolverOk: custom resolver ok=true takes priority over env.
+func TestVarCustomResolverOk(t *testing.T) {
+	t.Setenv("SETAY_TEST_HOST", "env-value")
+	setay.RegisterVariableResolver(func(name string) (string, bool, error) {
+		if name == "SETAY_TEST_HOST" {
+			return "custom-value", true, nil
+		}
+		return "", false, nil
+	})
+	defer setay.RegisterVariableResolver(nil)
+
+	input := `{ host = ${SETAY_TEST_HOST} }`
+	var cfg VarConfig
+	if err := setay.Unmarshal([]byte(input), &cfg); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if cfg.Host != "custom-value" {
+		t.Errorf("Host = %q, want %q", cfg.Host, "custom-value")
+	}
+}
+
+// TestVarCustomResolverFallsToEnv: resolver ok=false falls through to env.
+func TestVarCustomResolverFallsToEnv(t *testing.T) {
+	t.Setenv("SETAY_TEST_HOST", "fallback-env")
+	setay.RegisterVariableResolver(func(name string) (string, bool, error) {
+		// Always return ok=false → env should be used.
+		return "", false, nil
+	})
+	defer setay.RegisterVariableResolver(nil)
+
+	input := `{ host = ${SETAY_TEST_HOST} }`
+	var cfg VarConfig
+	if err := setay.Unmarshal([]byte(input), &cfg); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if cfg.Host != "fallback-env" {
+		t.Errorf("Host = %q, want %q", cfg.Host, "fallback-env")
+	}
+}
+
+// TestVarNumberFallback: ${MISSING ?: 9999} uses integer literal fallback.
+func TestVarNumberFallback(t *testing.T) {
+	os.Unsetenv("SETAY_MISSING_PORT")
+
+	input := `{ port = ${SETAY_MISSING_PORT ?: 9999} }`
+	var cfg VarConfig
+	if err := setay.Unmarshal([]byte(input), &cfg); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if cfg.Port != 9999 {
+		t.Errorf("Port = %d, want 9999", cfg.Port)
+	}
+}
+
+// TestVarStringFallback: ${MISSING ?: "fallback"} uses string literal fallback.
+func TestVarStringFallback(t *testing.T) {
+	os.Unsetenv("SETAY_MISSING_KEY")
+
+	input := `{ key = ${SETAY_MISSING_KEY ?: "my-default-key"} }`
+	var cfg VarConfig
+	if err := setay.Unmarshal([]byte(input), &cfg); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if cfg.Key != "my-default-key" {
+		t.Errorf("Key = %q, want %q", cfg.Key, "my-default-key")
+	}
+}
+
+// TestVarFallbackChain: ${A ?: B ?: "last"} tries in order.
+func TestVarFallbackChain(t *testing.T) {
+	os.Unsetenv("SETAY_CHAIN_A")
+	os.Unsetenv("SETAY_CHAIN_B")
+
+	input := `{ host = ${SETAY_CHAIN_A ?: SETAY_CHAIN_B ?: "last-resort"} }`
+	var cfg VarConfig
+	if err := setay.Unmarshal([]byte(input), &cfg); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if cfg.Host != "last-resort" {
+		t.Errorf("Host = %q, want %q", cfg.Host, "last-resort")
+	}
+}
+
+// TestVarFallbackChainMiddle: second variable in chain is set.
+func TestVarFallbackChainMiddle(t *testing.T) {
+	os.Unsetenv("SETAY_CHAIN_A")
+	t.Setenv("SETAY_CHAIN_B", "from-B")
+
+	input := `{ host = ${SETAY_CHAIN_A ?: SETAY_CHAIN_B ?: "last-resort"} }`
+	var cfg VarConfig
+	if err := setay.Unmarshal([]byte(input), &cfg); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if cfg.Host != "from-B" {
+		t.Errorf("Host = %q, want %q", cfg.Host, "from-B")
+	}
+}
+
+// TestVarStringInterpolationMiddle: "prefix-${VAR}-suffix" expansion.
+func TestVarStringInterpolationMiddle(t *testing.T) {
+	t.Setenv("SETAY_INTERP_VAR", "middle")
+
+	input := `{ greeting = "prefix-${SETAY_INTERP_VAR}-suffix" }`
+	var cfg VarConfig
+	if err := setay.Unmarshal([]byte(input), &cfg); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	want := "prefix-middle-suffix"
+	if cfg.Greeting != want {
+		t.Errorf("Greeting = %q, want %q", cfg.Greeting, want)
+	}
+}
+
+// TestVarStringInterpolationMultiple: multiple variables expanded in one string.
+func TestVarStringInterpolationMultiple(t *testing.T) {
+	t.Setenv("SETAY_INTERP_A", "Hello")
+	t.Setenv("SETAY_INTERP_B", "world")
+
+	// Both variables are set — both expand in the same string.
+	input := `{ greeting = "${SETAY_INTERP_A}, ${SETAY_INTERP_B}!" }`
+	var cfg VarConfig
+	if err := setay.Unmarshal([]byte(input), &cfg); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	want := "Hello, world!"
+	if cfg.Greeting != want {
+		t.Errorf("Greeting = %q, want %q", cfg.Greeting, want)
+	}
+}
+
+// TestVarStringInterpolationWithFallback: fallback with single-quoted string inside double-quoted interpolation.
+func TestVarStringInterpolationWithFallback(t *testing.T) {
+	t.Setenv("SETAY_INTERP_A", "Hello")
+	os.Unsetenv("SETAY_INTERP_MISSING")
+
+	// ${SETAY_INTERP_MISSING ?: 'default'} uses single-quoted string as fallback inside double-quoted string.
+	input := `{ greeting = "${SETAY_INTERP_A}, ${SETAY_INTERP_MISSING ?: 'world'}!" }`
+	var cfg VarConfig
+	if err := setay.Unmarshal([]byte(input), &cfg); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	want := "Hello, world!"
+	if cfg.Greeting != want {
+		t.Errorf("Greeting = %q, want %q", cfg.Greeting, want)
+	}
+}
+
+// TestVarInterpolationFallbackNumber: number fallback inside string interpolation.
+func TestVarInterpolationFallbackNumber(t *testing.T) {
+	os.Unsetenv("SETAY_INTERP_PORT")
+
+	input := `{ greeting = "Port is ${SETAY_INTERP_PORT ?: 8080}" }`
+	var cfg VarConfig
+	if err := setay.Unmarshal([]byte(input), &cfg); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	want := "Port is 8080"
+	if cfg.Greeting != want {
+		t.Errorf("Greeting = %q, want %q", cfg.Greeting, want)
+	}
+}
+
+// TestVarUndefinedError: undefined variable with no fallback causes an error.
+func TestVarUndefinedError(t *testing.T) {
+	os.Unsetenv("SETAY_UNDEFINED_XYZZY")
+
+	input := `{ host = ${SETAY_UNDEFINED_XYZZY} }`
+	var cfg VarConfig
+	err := setay.Unmarshal([]byte(input), &cfg)
+	if err == nil {
+		t.Fatal("Expected error for undefined variable, got nil")
+	}
+	if !strings.Contains(err.Error(), "SETAY_UNDEFINED_XYZZY") {
+		t.Errorf("Error should mention the variable name, got: %v", err)
+	}
+}
+
+// TestVarResolverError: resolver returning an error propagates to Unmarshal.
+func TestVarResolverError(t *testing.T) {
+	setay.RegisterVariableResolver(func(name string) (string, bool, error) {
+		return "", false, fmt.Errorf("injected resolver error")
+	})
+	defer setay.RegisterVariableResolver(nil)
+
+	input := `{ host = ${SOME_VAR} }`
+	var cfg VarConfig
+	err := setay.Unmarshal([]byte(input), &cfg)
+	if err == nil {
+		t.Fatal("Expected error from resolver, got nil")
+	}
+	if !strings.Contains(err.Error(), "injected resolver error") {
+		t.Errorf("Error should contain resolver error message, got: %v", err)
+	}
+}
+
+// TestVarResolverReset: RegisterVariableResolver(nil) resets to env-only mode.
+func TestVarResolverReset(t *testing.T) {
+	calledWith := ""
+	setay.RegisterVariableResolver(func(name string) (string, bool, error) {
+		calledWith = name
+		return "custom", true, nil
+	})
+
+	// Verify resolver is active.
+	t.Setenv("SETAY_RESET_TEST", "env-value")
+	input := `{ host = ${SETAY_RESET_TEST} }`
+	var cfg1 VarConfig
+	if err := setay.Unmarshal([]byte(input), &cfg1); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if cfg1.Host != "custom" {
+		t.Errorf("Before reset: Host = %q, want %q", cfg1.Host, "custom")
+	}
+	if calledWith != "SETAY_RESET_TEST" {
+		t.Errorf("Resolver was not called, calledWith = %q", calledWith)
+	}
+
+	// Reset resolver.
+	setay.RegisterVariableResolver(nil)
+
+	// Now env variable should be used.
+	var cfg2 VarConfig
+	if err := setay.Unmarshal([]byte(input), &cfg2); err != nil {
+		t.Fatalf("Unmarshal after reset error: %v", err)
+	}
+	if cfg2.Host != "env-value" {
+		t.Errorf("After reset: Host = %q, want %q", cfg2.Host, "env-value")
+	}
+}
+
+// TestVarBoolFallback: variable with bool fallback.
+func TestVarBoolFallback(t *testing.T) {
+	os.Unsetenv("SETAY_DEBUG_FLAG")
+
+	// Note: bool fallback uses "true"/"false" string which setFromString handles.
+	input := `{ debug = ${SETAY_DEBUG_FLAG ?: "true"} }`
+	var cfg VarConfig
+	if err := setay.Unmarshal([]byte(input), &cfg); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if !cfg.Debug {
+		t.Errorf("Debug = false, want true")
+	}
+}
+
+// TestVarBareDollarLiteral: bare '$' not followed by '{' is literal.
+func TestVarBareDollarLiteral(t *testing.T) {
+	input := `{ greeting = "price: $100" }`
+	var cfg VarConfig
+	if err := setay.Unmarshal([]byte(input), &cfg); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if cfg.Greeting != "price: $100" {
+		t.Errorf("Greeting = %q, want %q", cfg.Greeting, "price: $100")
+	}
+}
+
