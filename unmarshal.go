@@ -182,13 +182,18 @@ func (u *unmarshaler) setMapEntry(entry *DefSetayDictEntry, target reflect.Value
 }
 
 // extractKeyText gets the key as a plain string.
+// Variable resolution errors inside a DQ string key are silently ignored and "" is
+// returned. Keys are ordinarily plain literals, so this is acceptable — however, an
+// entry whose key contains an undefined variable will be silently skipped.
 func (u *unmarshaler) extractKeyText(key *DefSetayDictKey) string {
 	inner := key.AnonymousField1
 	switch v := inner.(type) {
 	case *DefSetayBareKey:
 		return u.textOf(v.GetAuthority())
 	case *DefSetayString:
-		return u.decodeString(v)
+		// Ignore variable resolution errors in string keys — keys are ordinarily literals.
+		s, _ := u.decodeString(v)
+		return s
 	default:
 		return u.textOf(key.GetAuthority())
 	}
@@ -221,7 +226,10 @@ func (u *unmarshaler) unmarshalValue(val *DefSetayValue, target reflect.Value) e
 	case *DefSetayFalse:
 		return u.setBool(target, false)
 	case *DefSetayString:
-		s := u.decodeString(v)
+		s, err := u.decodeString(v)
+		if err != nil {
+			return err
+		}
 		return u.setString(target, s)
 	case *DefSetayNumber:
 		numText := u.textOf(v.GetAuthority())
@@ -360,7 +368,10 @@ func (u *unmarshaler) unmarshalList(list *DefSetayList, target reflect.Value) er
 
 func (u *unmarshaler) setUtcTs(utcts *DefSetayUtcTs, target reflect.Value) error {
 	// Extract the string value inside UtcTs(...)
-	s := u.decodeString(utcts.Value)
+	s, err := u.decodeString(utcts.Value)
+	if err != nil {
+		return fmt.Errorf("setay: UtcTs variable resolution: %w", err)
+	}
 
 	// Try parsing various time formats
 	formats := []string{
@@ -455,38 +466,36 @@ func (u *unmarshaler) setWantaiTs(t time.Time, target reflect.Value) error {
 }
 
 // decodeString extracts the unescaped string content from a SetayString node.
-func (u *unmarshaler) decodeString(str *DefSetayString) string {
+// An error is returned only when variable resolution inside a DQ string fails.
+func (u *unmarshaler) decodeString(str *DefSetayString) (string, error) {
 	inner := str.AnonymousField1
 	switch v := inner.(type) {
 	case *DefSetayDqString:
 		return u.decodeStringContent(v.Content)
 	case *DefSetaySqString:
-		return u.decodeSqStringContent(v.Content)
+		return u.decodeSqStringContent(v.Content), nil
 	default:
 		// Fallback: strip quotes from raw text
 		raw := u.textOf(str.GetAuthority())
 		if len(raw) >= 2 {
-			return raw[1 : len(raw)-1]
+			return raw[1 : len(raw)-1], nil
 		}
-		return raw
+		return raw, nil
 	}
 }
 
-func (u *unmarshaler) decodeStringContent(contents []*DefSetayDqStringContent) string {
+func (u *unmarshaler) decodeStringContent(contents []*DefSetayDqStringContent) (string, error) {
 	var sb strings.Builder
 	for _, c := range contents {
 		inner := c.AnonymousField1
 		switch v := inner.(type) {
 		case *DefSetayVarRef:
-			// String interpolation (plan B): expand variable inside double-quoted string.
-			// Errors are silently turned into empty string to preserve string-building
-			// context; a proper error path would require returning an error from here.
+			// Variable interpolation inside a DQ string — errors propagate to the caller.
 			resolved, err := u.resolveVarRef(v)
-			if err == nil {
-				sb.WriteString(resolved)
+			if err != nil {
+				return "", err
 			}
-			// When err != nil, leave the variable as empty — callers that need strict
-			// error handling should use unmarshalValue which returns errors directly.
+			sb.WriteString(resolved)
 		case *DefSetayEscapeSequence:
 			sb.WriteString(u.decodeEscape(v))
 		case *DefSetayDqDollarChar:
@@ -498,7 +507,7 @@ func (u *unmarshaler) decodeStringContent(contents []*DefSetayDqStringContent) s
 			sb.WriteString(u.textOf(c.GetAuthority()))
 		}
 	}
-	return sb.String()
+	return sb.String(), nil
 }
 
 func (u *unmarshaler) decodeSqStringContent(contents []*DefSetaySqStringContent) string {
@@ -539,16 +548,19 @@ func (u *unmarshaler) decodeEscape(esc *DefSetayEscapeSequence) string {
 	case '\'':
 		return "'"
 	case 'x':
+		// ParseInt cannot fail here: the PEG grammar requires exactly 2 hex digits.
 		if len(escText) == 4 {
 			n, _ := strconv.ParseInt(escText[2:4], 16, 32)
 			return string(rune(n))
 		}
 	case 'u':
+		// ParseInt cannot fail here: the PEG grammar requires exactly 4 hex digits.
 		if len(escText) == 6 {
 			n, _ := strconv.ParseInt(escText[2:6], 16, 32)
 			return string(rune(n))
 		}
 	case 'U':
+		// ParseInt cannot fail here: the PEG grammar requires exactly 8 hex digits.
 		if len(escText) == 10 {
 			n, _ := strconv.ParseInt(escText[2:10], 16, 32)
 			return string(rune(n))
@@ -621,7 +633,10 @@ func (u *unmarshaler) unmarshalSetKey(key *DefSetaySetKey, target reflect.Value)
 	case *DefSetayFalse:
 		return u.setBool(target, false)
 	case *DefSetayString:
-		s := u.decodeString(v)
+		s, err := u.decodeString(v)
+		if err != nil {
+			return err
+		}
 		return u.setString(target, s)
 	case *DefSetayNumber:
 		numText := u.textOf(v.GetAuthority())
@@ -689,9 +704,13 @@ func (u *unmarshaler) resolveFallback(fb *DefSetayVarFallback) (string, error) {
 		}
 		// Not found — continue the chain inside this VarRef's own fallback.
 		if len(node.Expr.Fallback) > 0 {
-			if result, err2 := u.resolveFallback(node.Expr.Fallback[0]); err2 == nil {
+			result, err2 := u.resolveFallback(node.Expr.Fallback[0])
+			if err2 == nil {
 				return result, nil
 			}
+			// All errors from the recursive call propagate upward.
+			// (undefined variable / fallback exhausted / resolver error — none are excluded)
+			return "", err2
 		}
 		// Still not found — try the sibling Next chain.
 		if len(fb.Next) > 0 {
@@ -715,7 +734,11 @@ func (u *unmarshaler) resolveFallback(fb *DefSetayVarFallback) (string, error) {
 		return "", fmt.Errorf("setay: variable %q is not defined and has no more fallbacks", varName)
 	case *DefSetayString:
 		// Literal string fallback.
-		return u.decodeString(node), nil
+		s, err := u.decodeString(node)
+		if err != nil {
+			return "", err
+		}
+		return s, nil
 	case *DefSetayNumber:
 		// Literal number fallback — return as-is string.
 		return u.textOf(node.GetAuthority()), nil

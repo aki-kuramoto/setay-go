@@ -158,9 +158,33 @@ backup  = ${A ?: B ?: "final"};   # chained fallbacks
 ```
 
 Fallback values can be:
-- **Another variable name** — resolved recursively (without `${}`)
+- **Another variable name** — resolved recursively (written without `${}`)
 - **An integer or float literal** — used as a string when the target type requires it
 - **A single- or double-quoted string literal**
+
+> **Important:** A bare word (unquoted identifier) after `?:` is always interpreted as a
+> **variable name**, not as a string literal. To use a fixed string as a fallback, you must
+> enclose it in quotes:
+>
+> ```setay
+> # ✅ Correct — "fallback" and 'fallback' are string literals
+> v = ${MISSING ?: "fallback"}
+> v = ${MISSING ?: 'fallback'}
+>
+> # ⚠️ This resolves the variable named `fallback` (not the text "fallback")
+> # If no variable named `fallback` is defined, this will produce an error.
+> v = ${MISSING ?: fallback}
+> ```
+>
+> The same rule applies inside double-quoted string interpolation:
+>
+> ```setay
+> # ✅ Correct
+> msg = "Hello, ${NAME ?: "stranger"}!"
+>
+> # ⚠️ Tries to resolve the variable named `stranger`
+> msg = "Hello, ${NAME ?: stranger}!"
+> ```
 
 ## 5.4 String Interpolation
 
@@ -174,6 +198,8 @@ Rules:
 - String interpolation works **only** inside double-quoted strings (`"..."`)
 - Single-quoted strings (`'...'`) are always literal — `${VAR}` inside them is not expanded
 - A `$` not followed by `{` is treated as a literal `$` character (e.g. `"price: $100"`)
+- Inside an interpolation expression (`${...}`), a bare word after `?:` is a **variable name**.
+  To use a literal string as fallback, it must be quoted: `${VAR ?: "text"}` or `${VAR ?: 'text'}`.
 
 ## 5.5 Resolution Order
 
@@ -523,6 +549,29 @@ backup = ${A ?: B ?: "final"};    # フォールバックのチェーン
 - **整数または浮動小数点のリテラル** — 型変換が必要な場合は文字列として使用される
 - **シングルまたはダブルクォートの文字列リテラル**
 
+> **重要:** `?:` の直後に書いたクォートなしの識別子は、常に**変数名**として解釈されます。
+> 固定の文字列をフォールバックとして使いたい場合は、必ずクォートで囲んでください：
+>
+> ```setay
+> # ✅ 正しい — "fallback" と 'fallback' は文字列リテラル
+> v = ${MISSING ?: "fallback"}
+> v = ${MISSING ?: 'fallback'}
+>
+> # ⚠️ これは変数 fallback を解決しようとする（文字列 "fallback" ではない）
+> # fallback という変数が未定義の場合はエラーになる
+> v = ${MISSING ?: fallback}
+> ```
+>
+> ダブルクォート文字列の補間式内でも同じルールが適用されます：
+>
+> ```setay
+> # ✅ 正しい
+> msg = "Hello, ${NAME ?: "stranger"}!"
+>
+> # ⚠️ stranger という変数を解決しようとする
+> msg = "Hello, ${NAME ?: stranger}!"
+> ```
+
 ## 5.4 文字列補間
 
 **ダブルクォート文字列** 内では `${VAR}` がその場で展開されます：
@@ -535,6 +584,8 @@ message = "Hello, ${NAME ?: 'stranger'}! Port is ${PORT ?: 8080}.";
 - 文字列補間は **ダブルクォート文字列**（`"..."`）内でのみ機能する
 - シングルクォート文字列（`'...'`）は常にリテラル — `${VAR}` は展開されない
 - `${` が続かない `$` は文字リテラルとして扱われる（例：`"price: $100"`）
+- 補間式（`${...}`）内で `?:` の右辺に書いたクォートなしの識別子は**変数名**として扱われる。
+  リテラル文字列をフォールバックとして使うにはクォートが必要：`${VAR ?: "テキスト"}` または `${VAR ?: 'テキスト'}`。
 
 ## 5.5 解決の優先順位
 

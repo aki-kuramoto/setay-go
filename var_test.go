@@ -874,3 +874,264 @@ func TestVarDoesNotAffectNonVarFields(t *testing.T) {
 		t.Error("BoolVal = true, want false")
 	}
 }
+
+// =====================================================================
+//  Category 11: Regression tests — DQ string interpolation fallback
+// =====================================================================
+
+// TestDqInterpolationFallbackUnsetVar verifies that the fallback value is correctly
+// applied when the variable is unset inside a double-quoted string interpolation.
+//
+// Before fix: decodeStringContent silently swallowed the error and wrote "" to the buffer.
+// After fix:  the error from resolveVarRef propagates to the caller, and the fallback applies.
+func TestDqInterpolationFallbackUnsetVar(t *testing.T) {
+	os.Unsetenv("SETAY_DQ_UNSET")
+	var cfg VarTypedConfig
+	if err := setay.Unmarshal([]byte(`{ str-val = "${SETAY_DQ_UNSET ?: "fallback-value"}" }`), &cfg); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if cfg.StrVal != "fallback-value" {
+		t.Errorf("StrVal = %q, want %q (fallback should apply when var is unset in DQ interpolation)", cfg.StrVal, "fallback-value")
+	}
+}
+
+// TestDqInterpolationFallbackSetVar verifies that the fallback is not used when
+// the variable is defined, inside a double-quoted string interpolation.
+func TestDqInterpolationFallbackSetVar(t *testing.T) {
+	t.Setenv("SETAY_DQ_SET", "from-env")
+	var cfg VarTypedConfig
+	if err := setay.Unmarshal([]byte(`{ str-val = "${SETAY_DQ_SET ?: "not-used"}" }`), &cfg); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if cfg.StrVal != "from-env" {
+		t.Errorf("StrVal = %q, want %q (env value should be used when var is set)", cfg.StrVal, "from-env")
+	}
+}
+
+// TestDqInterpolationFallbackEmptyVar verifies that an environment variable set to an
+// empty string is still considered "defined" (os.LookupEnv returns ok=true), so the
+// fallback must NOT be used.
+func TestDqInterpolationFallbackEmptyVar(t *testing.T) {
+	t.Setenv("SETAY_DQ_EMPTY", "")
+	var cfg VarTypedConfig
+	if err := setay.Unmarshal([]byte(`{ str-val = "${SETAY_DQ_EMPTY ?: "not-used"}" }`), &cfg); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if cfg.StrVal != "" {
+		t.Errorf("StrVal = %q, want empty string (set-but-empty var must not trigger fallback)", cfg.StrVal)
+	}
+}
+
+// TestDqInterpolationMixedSetAndUnset verifies that multiple interpolations in a single
+// double-quoted string work correctly when some variables are set and others are not.
+func TestDqInterpolationMixedSetAndUnset(t *testing.T) {
+	t.Setenv("SETAY_DQ_MIX_A", "hello")
+	os.Unsetenv("SETAY_DQ_MIX_B")
+	var cfg VarTypedConfig
+	if err := setay.Unmarshal([]byte(`{ str-val = "${SETAY_DQ_MIX_A}-${SETAY_DQ_MIX_B ?: "world"}" }`), &cfg); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if cfg.StrVal != "hello-world" {
+		t.Errorf("StrVal = %q, want %q", cfg.StrVal, "hello-world")
+	}
+}
+
+// TestDqInterpolationUndefinedVarNoFallbackReturnsError verifies that Unmarshal returns
+// an error when a variable inside a DQ string interpolation is undefined and has no fallback.
+//
+// Before fix: the error was silently ignored and "" was written to the result.
+func TestDqInterpolationUndefinedVarNoFallbackReturnsError(t *testing.T) {
+	os.Unsetenv("SETAY_DQ_NOFB_XYZ")
+	var cfg VarTypedConfig
+	err := setay.Unmarshal([]byte(`{ str-val = "${SETAY_DQ_NOFB_XYZ}" }`), &cfg)
+	if err == nil {
+		t.Fatalf("expected error for undefined variable without fallback in DQ interpolation, got nil (str-val=%q)", cfg.StrVal)
+	}
+	if !strings.Contains(err.Error(), "SETAY_DQ_NOFB_XYZ") {
+		t.Errorf("error should mention the variable name, got: %v", err)
+	}
+}
+
+// =====================================================================
+//  Category 12: resolveFallback error propagation (code review finding #1)
+// =====================================================================
+//
+// Before fix: in the *DefSetayVarRef case of resolveFallback, the error (err2) returned
+// by the recursive call for the VarRef's own nested fallback was unconditionally ignored
+// and execution continued to the Next chain. This could silently swallow custom resolver
+// errors.
+// After fix: all errors from the recursive call are propagated to the caller.
+
+// TestResolveFallbackResolverErrorInNestedVarRef verifies that a custom resolver error
+// propagates correctly when the fallback itself is a nested variable reference
+// of the form ${OUTER ?: ${INNER ?: "last"}}.
+func TestResolveFallbackResolverErrorInNestedVarRef(t *testing.T) {
+	os.Unsetenv("SETAY_NEST_OUTER")
+	os.Unsetenv("SETAY_NEST_INNER")
+
+	sentinelErr := fmt.Errorf("nested-resolver-sentinel")
+	setay.RegisterVariableResolver(func(name string) (string, bool, error) {
+		if name == "SETAY_NEST_INNER" {
+			return "", false, sentinelErr
+		}
+		return "", false, nil
+	})
+	defer setay.RegisterVariableResolver(nil)
+
+	// OUTER is unset → try INNER → resolver returns error → must propagate
+	input := `{ str-val = ${SETAY_NEST_OUTER ?: ${SETAY_NEST_INNER ?: "last"}} }`
+	var cfg VarTypedConfig
+	err := setay.Unmarshal([]byte(input), &cfg)
+	if err == nil {
+		t.Fatalf("expected resolver error to propagate, got nil (str-val=%q)", cfg.StrVal)
+	}
+	if !strings.Contains(err.Error(), "nested-resolver-sentinel") {
+		t.Errorf("error should contain sentinel, got: %v", err)
+	}
+}
+
+// TestResolveFallbackChainWithVarRef verifies that a nested variable reference in a
+// fallback chain resolves correctly when the inner variable is defined.
+func TestResolveFallbackChainWithVarRef(t *testing.T) {
+	os.Unsetenv("SETAY_CHAIN_A")
+	t.Setenv("SETAY_CHAIN_B", "from-B")
+
+	// CHAIN_A is unset → try CHAIN_B → CHAIN_B is set → "from-B"
+	input := `{ str-val = ${SETAY_CHAIN_A ?: ${SETAY_CHAIN_B ?: "last"}} }`
+	var cfg VarTypedConfig
+	if err := setay.Unmarshal([]byte(input), &cfg); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if cfg.StrVal != "from-B" {
+		t.Errorf("StrVal = %q, want %q", cfg.StrVal, "from-B")
+	}
+}
+
+// TestResolveFallbackChainWithVarRefAllUnset verifies that when all variable references
+// in a nested fallback chain are unset, the final literal fallback is used.
+func TestResolveFallbackChainWithVarRefAllUnset(t *testing.T) {
+	os.Unsetenv("SETAY_ALL_A")
+	os.Unsetenv("SETAY_ALL_B")
+
+	// ALL_A is unset → ALL_B is unset → use literal "final-literal"
+	input := `{ str-val = ${SETAY_ALL_A ?: ${SETAY_ALL_B ?: "final-literal"}} }`
+	var cfg VarTypedConfig
+	if err := setay.Unmarshal([]byte(input), &cfg); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if cfg.StrVal != "final-literal" {
+		t.Errorf("StrVal = %q, want %q", cfg.StrVal, "final-literal")
+	}
+}
+
+// =====================================================================
+//  Category 13: extractKeyText behavior (code review finding #2)
+// =====================================================================
+//
+// extractKeyText silently ignores variable resolution errors in DQ string keys,
+// returning "" on failure. As a result, an entry whose key resolves to "" will not
+// match any struct field and will be skipped — the same behavior as an unknown field.
+// These tests document that contract explicitly.
+
+// TestDqKeyWithDefinedVar verifies that a DQ string dict key containing a variable
+// reference is correctly resolved when the variable is defined.
+func TestDqKeyWithDefinedVar(t *testing.T) {
+	t.Setenv("SETAY_DQ_KEY", "str-val")
+	// Key "${SETAY_DQ_KEY}" resolves to "str-val" → matches the struct field
+	input := `{ "${SETAY_DQ_KEY}" = "resolved-via-key-var" }`
+	var cfg VarTypedConfig
+	if err := setay.Unmarshal([]byte(input), &cfg); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if cfg.StrVal != "resolved-via-key-var" {
+		t.Errorf("StrVal = %q, want %q", cfg.StrVal, "resolved-via-key-var")
+	}
+}
+
+// TestDqKeyWithUndefinedVar verifies that when a DQ string dict key contains an
+// undefined variable, no error is returned and the entry is silently skipped
+// (the key resolves to "", which matches no field).
+func TestDqKeyWithUndefinedVar(t *testing.T) {
+	os.Unsetenv("SETAY_DQ_UNDEF_KEY")
+	// Key "${SETAY_DQ_UNDEF_KEY}" → error ignored → key="" → no field match → skipped
+	input := `{ "${SETAY_DQ_UNDEF_KEY}" = "should-be-skipped"; str-val = "correct" }`
+	var cfg VarTypedConfig
+	if err := setay.Unmarshal([]byte(input), &cfg); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	// "correct" must reach the field; the skipped entry must not overwrite it
+	if cfg.StrVal != "correct" {
+		t.Errorf("StrVal = %q, want %q", cfg.StrVal, "correct")
+	}
+}
+
+// =====================================================================
+//  Category 14: decodeEscape coverage (code review finding #3)
+// =====================================================================
+//
+// The strconv.ParseInt calls inside decodeEscape use blank error identifiers (_)
+// because the PEG grammar guarantees that only syntactically valid escape sequences
+// reach that code path. These tests confirm that each escape form produces the
+// expected output.
+
+// TestEscapeSequenceHex verifies that \xXX hex escape sequences are decoded correctly.
+func TestEscapeSequenceHex(t *testing.T) {
+	// \x41 = 'A' (65), \x7F = DEL (127)
+	var cfg VarTypedConfig
+	if err := setay.Unmarshal([]byte(`{ str-val = "\x41\x7F" }`), &cfg); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if cfg.StrVal != "A\x7F" {
+		t.Errorf("StrVal = %q, want %q", cfg.StrVal, "A\x7F")
+	}
+}
+
+// TestEscapeSequenceUnicode4 verifies that \uXXXX Unicode escape sequences are decoded correctly.
+func TestEscapeSequenceUnicode4(t *testing.T) {
+	// \u3042 = あ, \u0041 = A
+	var cfg VarTypedConfig
+	if err := setay.Unmarshal([]byte(`{ str-val = "\u3042\u0041" }`), &cfg); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if cfg.StrVal != "あA" {
+		t.Errorf("StrVal = %q, want %q", cfg.StrVal, "あA")
+	}
+}
+
+// TestEscapeSequenceUnicode8 verifies that \UXXXXXXXX Unicode escape sequences are decoded correctly.
+func TestEscapeSequenceUnicode8(t *testing.T) {
+	// \U0001F600 = 😀 (U+1F600)
+	var cfg VarTypedConfig
+	if err := setay.Unmarshal([]byte(`{ str-val = "\U0001F600" }`), &cfg); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if cfg.StrVal != "😀" {
+		t.Errorf("StrVal = %q, want 😀", cfg.StrVal)
+	}
+}
+
+// TestEscapeSequenceAllBasic verifies that every basic escape sequence is decoded correctly.
+func TestEscapeSequenceAllBasic(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{`"\t"`, "\t"},
+		{`"\r"`, "\r"},
+		{`"\n"`, "\n"},
+		{`"\0"`, "\x00"},
+		{`"\\"`, "\\"},
+		{`"\""`, "\""},
+	}
+	for _, tc := range cases {
+		input := fmt.Sprintf(`{ str-val = %s }`, tc.input)
+		var cfg VarTypedConfig
+		if err := setay.Unmarshal([]byte(input), &cfg); err != nil {
+			t.Errorf("input=%s: Unmarshal error: %v", tc.input, err)
+			continue
+		}
+		if cfg.StrVal != tc.want {
+			t.Errorf("input=%s: StrVal = %q, want %q", tc.input, cfg.StrVal, tc.want)
+		}
+	}
+}

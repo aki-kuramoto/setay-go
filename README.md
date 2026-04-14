@@ -178,6 +178,8 @@ At unmarshal time, `${VAR_NAME}` is replaced with the value of the named variabl
 - `${VAR_NAME}` — refers to a variable by name (bare identifier, same rules as a bare key)
 - `?: value` — fallback if the variable is not defined; can chain: `?: A ?: B ?: "final"`
 - Fallback values can be: another variable name, an integer/float literal, a quoted string
+  > **Note:** A bare word after `?:` (e.g. `${VAR ?: fallback}`) is treated as a **variable name**,
+  > not a string literal. Use quotes to specify a literal: `${VAR ?: "fallback"}` or `${VAR ?: 'fallback'}`.
 - String interpolation works **only** inside double-quoted strings (`"..."`); single-quoted strings (`'...'`) are always literal
 - A bare `$` not followed by `{` is treated as a literal `$` character
 - Variable references are an **unmarshal-only** feature; `Marshal` always outputs concrete values
@@ -496,6 +498,8 @@ setay.Unmarshal([]byte(input), &loaded)
 - `${VAR_NAME}` — 変数名（ベアキーと同じ文字規則の識別子）で変数を参照
 - `?: value` — 変数が未定義の場合のフォールバック。チェーン可能: `?: A ?: B ?: "final"`
 - フォールバック値の種類: 別の変数名、整数/浮動小数点リテラル、クォートされた文字列
+  > **注意:** `?:` 直後のクォートなし識別子（例: `${VAR ?: fallback}`）は**変数名**として扱われます。
+  > 文字列リテラルとして使う場合はクォートが必要：`${VAR ?: "fallback"}` または `${VAR ?: 'fallback'}`。
 - 文字列補間は **ダブルクォート文字列**（`"..."`）内でのみ機能。シングルクォート文字列（`'...'`）は常にリテラル
 - `${` が続かない裸の `$` は文字リテラルとして扱われる
 - 変数参照は **アンマーシャル専用** の機能。`Marshal` は常に具体的な値を出力する
