@@ -18,6 +18,14 @@ func RegisterVariableResolver(fn func(string) (string, bool, error)) {
 	variableResolver = fn
 }
 
+// ResolveVar resolves a variable name using the registered resolver and
+// falls back to environment variables. This is the public version of the
+// package-internal resolveVar function, intended for use by external tools
+// (e.g. setayq) that need to perform variable resolution outside of Unmarshal.
+func ResolveVar(name string) (string, bool, error) {
+	return resolveVar(name)
+}
+
 // resolveVar resolves a variable name using the following priority:
 //  1. Custom resolver (if registered and returns ok=true)
 //  2. Environment variable via os.LookupEnv (if resolver is nil or ok=false)

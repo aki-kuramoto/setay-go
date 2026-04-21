@@ -742,6 +742,12 @@ func (u *unmarshaler) resolveFallback(fb *DefSetayVarFallback) (string, error) {
 	case *DefSetayNumber:
 		// Literal number fallback — return as-is string.
 		return u.textOf(node.GetAuthority()), nil
+	case *DefSetayTrue:
+		// Literal boolean true fallback — return "true" so setFromString can coerce to bool.
+		return "true", nil
+	case *DefSetayFalse:
+		// Literal boolean false fallback — return "false" so setFromString can coerce to bool.
+		return "false", nil
 	default:
 		return u.textOf(fb.Value.GetAuthority()), nil
 	}

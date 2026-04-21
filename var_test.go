@@ -1135,3 +1135,58 @@ func TestEscapeSequenceAllBasic(t *testing.T) {
 		}
 	}
 }
+
+// =====================================================================
+//  Category 11: Boolean literal fallbacks (regression for resolveFallback)
+// =====================================================================
+
+// TestVarFallbackBoolFalse: ${MISSING ?: false} uses boolean false as fallback.
+// Regression test: previously "false" was treated as a variable name, causing
+// "setay: variable \"false\" is not defined and has no more fallbacks" error.
+func TestVarFallbackBoolFalse(t *testing.T) {
+	os.Unsetenv("SETAY_FB_BFALSE")
+	type BoolCfg struct {
+		Enabled bool `setay:"enabled"`
+	}
+	input := `{ enabled = ${SETAY_FB_BFALSE ?: false} }`
+	var cfg BoolCfg
+	if err := setay.Unmarshal([]byte(input), &cfg); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if cfg.Enabled {
+		t.Error("Enabled = true, want false (boolean literal fallback)")
+	}
+}
+
+// TestVarFallbackBoolTrue: ${MISSING ?: true} uses boolean true as fallback.
+func TestVarFallbackBoolTrue(t *testing.T) {
+	os.Unsetenv("SETAY_FB_BTRUE")
+	type BoolCfg struct {
+		Enabled bool `setay:"enabled"`
+	}
+	input := `{ enabled = ${SETAY_FB_BTRUE ?: true} }`
+	var cfg BoolCfg
+	if err := setay.Unmarshal([]byte(input), &cfg); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if !cfg.Enabled {
+		t.Error("Enabled = false, want true (boolean literal fallback)")
+	}
+}
+
+// TestVarFallbackBoolFalseEnvOverrides: when env var IS set, the boolean fallback is not used.
+func TestVarFallbackBoolFalseEnvOverrides(t *testing.T) {
+	t.Setenv("SETAY_FB_BENV", "true")
+	type BoolCfg struct {
+		Enabled bool `setay:"enabled"`
+	}
+	input := `{ enabled = ${SETAY_FB_BENV ?: false} }`
+	var cfg BoolCfg
+	if err := setay.Unmarshal([]byte(input), &cfg); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if !cfg.Enabled {
+		t.Error("Enabled = false, want true (env var overrides false fallback)")
+	}
+}
+

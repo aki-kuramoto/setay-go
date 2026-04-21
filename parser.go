@@ -5636,6 +5636,22 @@ func (p *PackratParser) parseSetayVarOrValue(pos int) (*DefSetayVarOrValue, int,
 			}
 		}
 		if !choiceMatched {
+			node, end, err := p.parseSetayTrue(pos)
+			if err == nil {
+				result.AnonymousField1 = node
+				pos = end
+				choiceMatched = true
+			}
+		}
+		if !choiceMatched {
+			node, end, err := p.parseSetayFalse(pos)
+			if err == nil {
+				result.AnonymousField1 = node
+				pos = end
+				choiceMatched = true
+			}
+		}
+		if !choiceMatched {
 			node, end, err := p.parseSetayVarName(pos)
 			if err == nil {
 				result.AnonymousField1 = node
