@@ -8,6 +8,14 @@ import (
 	"unicode"
 )
 
+// ---- Evaluation context ----
+
+// evalContext holds per-invocation state for filter evaluation,
+// including variables bound via --arg / --argjson.
+type evalContext struct {
+	args map[string]*Value // $name -> bound value
+}
+
 // ---- Filter AST ----
 
 type filterKind int
@@ -27,6 +35,7 @@ const (
 	fTry                  // try-catch
 	fIf                   // if-then-else
 	fBinOp                // a == b, a + b, etc.
+	fVar                  // $name (bound via --arg/--argjson)
 )
 
 type filter struct {
@@ -77,11 +86,12 @@ type tokenKind int
 
 const (
 	tokDot tokenKind = iota
-	tokDotDot   // ..
-	tokIdent    // foo
-	tokString   // "..." or 'foo-bar'
-	tokNumber   // 123
-	tokPipe     // |
+	tokDotDot      // ..
+	tokIdent       // foo
+	tokDollarIdent // $foo (bound variable)
+	tokString      // "..." or 'foo-bar'
+	tokNumber      // 123
+	tokPipe        // |
 	tokComma    // ,
 	tokLBracket // [
 	tokRBracket // ]
@@ -232,6 +242,9 @@ func (l *lexer) next() token {
 			return token{kind: tokEq, text: "==", pos: start}
 		}
 		return token{kind: tokIdent, text: "=", pos: start}
+	case r == '$':
+		l.pos++
+		return l.lexDollarIdent(start)
 	case r == '"':
 		return l.lexDqString(start)
 	case r == '\'':
@@ -307,6 +320,20 @@ func (l *lexer) lexNumber(start int) token {
 		}
 	}
 	return token{kind: tokNumber, text: string(l.input[start:l.pos]), pos: start}
+}
+
+// lexDollarIdent scans the identifier name after '$'.
+func (l *lexer) lexDollarIdent(start int) token {
+	nameStart := l.pos
+	for l.pos < len(l.input) && (l.input[l.pos] == '_' || unicode.IsLetter(l.input[l.pos]) || unicode.IsDigit(l.input[l.pos])) {
+		l.pos++
+	}
+	if l.pos == nameStart {
+		// bare '$' with no following ident
+		return token{kind: tokIdent, text: "$", pos: start}
+	}
+	name := string(l.input[nameStart:l.pos])
+	return token{kind: tokDollarIdent, text: name, pos: start}
 }
 
 func (l *lexer) lexIdent(start int) token {
@@ -560,6 +587,10 @@ func (p *parser) parsePrimary() (*filter, error) {
 	case tokString:
 		p.consume()
 		return &filter{kind: fLiteral, literal: &Value{kind: kindString, strVal: tok.text}}, nil
+	case tokDollarIdent:
+		// $name — bound variable reference
+		p.consume()
+		return &filter{kind: fVar, fieldName: tok.text}, nil
 	case tokIdent:
 		return p.parseBuiltinOrIdent()
 	case tokNot:
@@ -812,7 +843,7 @@ func (p *parser) parseObjectConstruct() (*filter, error) {
 // ---- Evaluator ----
 
 // evalFilter evaluates a filter against an input value, returning a stream of output values.
-func evalFilter(f *filter, input *Value) ([]*Value, error) {
+func evalFilter(f *filter, input *Value, ctx evalContext) ([]*Value, error) {
 	switch f.kind {
 	case fIdentity:
 		return []*Value{input}, nil
@@ -841,14 +872,23 @@ func evalFilter(f *filter, input *Value) ([]*Value, error) {
 		}
 		return items, nil
 
+	case fVar:
+		// $name — look up in ctx.args; return null if undefined
+		if ctx.args != nil {
+			if v, ok := ctx.args[f.fieldName]; ok {
+				return []*Value{v}, nil
+			}
+		}
+		return []*Value{{kind: kindNull}}, nil
+
 	case fPipe:
-		lefts, err := evalFilter(f.left, input)
+		lefts, err := evalFilter(f.left, input, ctx)
 		if err != nil {
 			return nil, err
 		}
 		var results []*Value
 		for _, l := range lefts {
-			rs, err := evalFilter(f.right, l)
+			rs, err := evalFilter(f.right, l, ctx)
 			if err != nil {
 				return nil, err
 			}
@@ -857,28 +897,28 @@ func evalFilter(f *filter, input *Value) ([]*Value, error) {
 		return results, nil
 
 	case fComma:
-		lefts, err := evalFilter(f.left, input)
+		lefts, err := evalFilter(f.left, input, ctx)
 		if err != nil {
 			return nil, err
 		}
-		rights, err := evalFilter(f.right, input)
+		rights, err := evalFilter(f.right, input, ctx)
 		if err != nil {
 			return nil, err
 		}
 		return append(lefts, rights...), nil
 
 	case fOptional:
-		results, _ := evalFilter(f.inner, input)
+		results, _ := evalFilter(f.inner, input, ctx)
 		return results, nil
 
 	case fLiteral:
 		return []*Value{f.literal}, nil
 
 	case fBuiltin:
-		return evalBuiltin(f, input)
+		return evalBuiltin(f, input, ctx)
 
 	case fArray:
-		results, err := evalFilter(f.inner, input)
+		results, err := evalFilter(f.inner, input, ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -892,13 +932,13 @@ func evalFilter(f *filter, input *Value) ([]*Value, error) {
 		return []*Value{{kind: kindArray, arrVal: cleaned}}, nil
 
 	case fObject:
-		return evalObjectConstruct(f, input)
+		return evalObjectConstruct(f, input, ctx)
 
 	case fBinOp:
-		return evalBinOp(f, input)
+		return evalBinOp(f, input, ctx)
 
 	case fIf:
-		conds, err := evalFilter(f.cond, input)
+		conds, err := evalFilter(f.cond, input, ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -912,7 +952,7 @@ func evalFilter(f *filter, input *Value) ([]*Value, error) {
 			} else {
 				continue
 			}
-			rs, err := evalFilter(branch, input)
+			rs, err := evalFilter(branch, input, ctx)
 			if err != nil {
 				return nil, err
 			}
@@ -921,11 +961,11 @@ func evalFilter(f *filter, input *Value) ([]*Value, error) {
 		return results, nil
 
 	case fTry:
-		results, err := evalFilter(f.left, input)
+		results, err := evalFilter(f.left, input, ctx)
 		if err != nil {
 			if f.right != nil {
 				errVal := &Value{kind: kindString, strVal: err.Error()}
-				return evalFilter(f.right, errVal)
+				return evalFilter(f.right, errVal, ctx)
 			}
 			return nil, nil
 		}
@@ -935,7 +975,7 @@ func evalFilter(f *filter, input *Value) ([]*Value, error) {
 	return nil, fmt.Errorf("unhandled filter kind %d", f.kind)
 }
 
-func evalBuiltin(f *filter, input *Value) ([]*Value, error) {
+func evalBuiltin(f *filter, input *Value, ctx evalContext) ([]*Value, error) {
 	switch f.builtinName {
 	case "keys":
 		v, err := input.keys(true)
@@ -977,7 +1017,7 @@ func evalBuiltin(f *filter, input *Value) ([]*Value, error) {
 
 	case "not":
 		if len(f.builtinArgs) > 0 {
-			results, err := evalFilter(f.builtinArgs[0], input)
+			results, err := evalFilter(f.builtinArgs[0], input, ctx)
 			if err != nil {
 				return nil, err
 			}
@@ -993,7 +1033,7 @@ func evalBuiltin(f *filter, input *Value) ([]*Value, error) {
 		if len(f.builtinArgs) == 0 {
 			return nil, fmt.Errorf("select requires an argument")
 		}
-		results, err := evalFilter(f.builtinArgs[0], input)
+		results, err := evalFilter(f.builtinArgs[0], input, ctx)
 		if err != nil {
 			return nil, nil // select silently drops errors
 		}
@@ -1014,7 +1054,7 @@ func evalBuiltin(f *filter, input *Value) ([]*Value, error) {
 		}
 		var out []*Value
 		for _, item := range items {
-			rs, err := evalFilter(f.builtinArgs[0], item)
+			rs, err := evalFilter(f.builtinArgs[0], item, ctx)
 			if err != nil {
 				return nil, err
 			}
@@ -1058,7 +1098,7 @@ func evalBuiltin(f *filter, input *Value) ([]*Value, error) {
 		if len(f.builtinArgs) == 0 {
 			return nil, fmt.Errorf("ltrimstr requires an argument")
 		}
-		args, err := evalFilter(f.builtinArgs[0], input)
+		args, err := evalFilter(f.builtinArgs[0], input, ctx)
 		if err != nil || len(args) == 0 {
 			return []*Value{input}, nil
 		}
@@ -1072,7 +1112,7 @@ func evalBuiltin(f *filter, input *Value) ([]*Value, error) {
 		if len(f.builtinArgs) == 0 {
 			return nil, fmt.Errorf("rtrimstr requires an argument")
 		}
-		args, err := evalFilter(f.builtinArgs[0], input)
+		args, err := evalFilter(f.builtinArgs[0], input, ctx)
 		if err != nil || len(args) == 0 {
 			return []*Value{input}, nil
 		}
@@ -1086,7 +1126,7 @@ func evalBuiltin(f *filter, input *Value) ([]*Value, error) {
 		if len(f.builtinArgs) == 0 {
 			return nil, fmt.Errorf("startswith requires an argument")
 		}
-		args, err := evalFilter(f.builtinArgs[0], input)
+		args, err := evalFilter(f.builtinArgs[0], input, ctx)
 		if err != nil || len(args) == 0 {
 			return nil, err
 		}
@@ -1097,7 +1137,7 @@ func evalBuiltin(f *filter, input *Value) ([]*Value, error) {
 		if len(f.builtinArgs) == 0 {
 			return nil, fmt.Errorf("endswith requires an argument")
 		}
-		args, err := evalFilter(f.builtinArgs[0], input)
+		args, err := evalFilter(f.builtinArgs[0], input, ctx)
 		if err != nil || len(args) == 0 {
 			return nil, err
 		}
@@ -1108,7 +1148,7 @@ func evalBuiltin(f *filter, input *Value) ([]*Value, error) {
 		if len(f.builtinArgs) == 0 {
 			return nil, fmt.Errorf("split requires an argument")
 		}
-		args, err := evalFilter(f.builtinArgs[0], input)
+		args, err := evalFilter(f.builtinArgs[0], input, ctx)
 		if err != nil || len(args) == 0 {
 			return nil, err
 		}
@@ -1126,7 +1166,7 @@ func evalBuiltin(f *filter, input *Value) ([]*Value, error) {
 		if len(f.builtinArgs) == 0 {
 			return nil, fmt.Errorf("join requires an argument")
 		}
-		args, err := evalFilter(f.builtinArgs[0], input)
+		args, err := evalFilter(f.builtinArgs[0], input, ctx)
 		if err != nil || len(args) == 0 {
 			return nil, err
 		}
@@ -1144,7 +1184,7 @@ func evalBuiltin(f *filter, input *Value) ([]*Value, error) {
 		if len(f.builtinArgs) == 0 {
 			return nil, fmt.Errorf("has requires an argument")
 		}
-		args, err := evalFilter(f.builtinArgs[0], &Value{kind: kindNull})
+		args, err := evalFilter(f.builtinArgs[0], &Value{kind: kindNull}, ctx)
 		if err != nil || len(args) == 0 {
 			return nil, err
 		}
@@ -1184,7 +1224,7 @@ func evalBuiltin(f *filter, input *Value) ([]*Value, error) {
 
 	case "first":
 		if len(f.builtinArgs) > 0 {
-			results, err := evalFilter(f.builtinArgs[0], input)
+			results, err := evalFilter(f.builtinArgs[0], input, ctx)
 			if err != nil {
 				return nil, err
 			}
@@ -1200,7 +1240,7 @@ func evalBuiltin(f *filter, input *Value) ([]*Value, error) {
 
 	case "last":
 		if len(f.builtinArgs) > 0 {
-			results, err := evalFilter(f.builtinArgs[0], input)
+			results, err := evalFilter(f.builtinArgs[0], input, ctx)
 			if err != nil {
 				return nil, err
 			}
@@ -1310,16 +1350,16 @@ func evalBuiltin(f *filter, input *Value) ([]*Value, error) {
 			return nil, fmt.Errorf("with_entries requires an argument")
 		}
 		// to_entries | map(f) | from_entries
-		entries, err := evalBuiltin(&filter{kind: fBuiltin, builtinName: "to_entries"}, input)
+		entries, err := evalBuiltin(&filter{kind: fBuiltin, builtinName: "to_entries"}, input, ctx)
 		if err != nil {
 			return nil, err
 		}
 		mapFilter := &filter{kind: fBuiltin, builtinName: "map", builtinArgs: f.builtinArgs}
-		mapped, err := evalBuiltin(mapFilter, entries[0])
+		mapped, err := evalBuiltin(mapFilter, entries[0], ctx)
 		if err != nil {
 			return nil, err
 		}
-		return evalBuiltin(&filter{kind: fBuiltin, builtinName: "from_entries"}, mapped[0])
+		return evalBuiltin(&filter{kind: fBuiltin, builtinName: "from_entries"}, mapped[0], ctx)
 
 	case "sort":
 		if input.kind != kindArray {
@@ -1336,7 +1376,7 @@ func evalBuiltin(f *filter, input *Value) ([]*Value, error) {
 		}
 		sorted := make([]*Value, len(input.arrVal))
 		copy(sorted, input.arrVal)
-		sortValuesByFilter(sorted, f.builtinArgs[0])
+		sortValuesByFilter(sorted, f.builtinArgs[0], ctx)
 		return []*Value{{kind: kindArray, arrVal: sorted}}, nil
 
 	case "group_by":
@@ -1351,7 +1391,7 @@ func evalBuiltin(f *filter, input *Value) ([]*Value, error) {
 		var groups []group
 		keyMap := map[string]int{}
 		for _, item := range input.arrVal {
-			ks, _ := evalFilter(f.builtinArgs[0], item)
+			ks, _ := evalFilter(f.builtinArgs[0], item, ctx)
 			keyStr := ""
 			if len(ks) > 0 {
 				keyStr = valueToSetayString(ks[0])
@@ -1384,9 +1424,9 @@ func evalBuiltin(f *filter, input *Value) ([]*Value, error) {
 		}
 		isMin := f.builtinName == "min_by"
 		best := input.arrVal[0]
-		bestKeys, _ := evalFilter(f.builtinArgs[0], best)
+		bestKeys, _ := evalFilter(f.builtinArgs[0], best, ctx)
 		for _, item := range input.arrVal[1:] {
-			ks, _ := evalFilter(f.builtinArgs[0], item)
+			ks, _ := evalFilter(f.builtinArgs[0], item, ctx)
 			if len(ks) == 0 || len(bestKeys) == 0 {
 				continue
 			}
@@ -1415,7 +1455,7 @@ func evalBuiltin(f *filter, input *Value) ([]*Value, error) {
 	case "error":
 		msg := "error"
 		if len(f.builtinArgs) > 0 {
-			rs, _ := evalFilter(f.builtinArgs[0], input)
+			rs, _ := evalFilter(f.builtinArgs[0], input, ctx)
 			if len(rs) > 0 {
 				msg = rs[0].strVal
 			}
@@ -1454,7 +1494,7 @@ func evalBuiltin(f *filter, input *Value) ([]*Value, error) {
 			var walk func(v *Value) error
 			walk = func(v *Value) error {
 				results = append(results, v)
-				rs, err := evalFilter(f.builtinArgs[0], v)
+				rs, err := evalFilter(f.builtinArgs[0], v, ctx)
 				if err != nil {
 					return nil
 				}
@@ -1494,7 +1534,7 @@ func evalBuiltin(f *filter, input *Value) ([]*Value, error) {
 		}
 		if len(f.builtinArgs) > 0 {
 			for _, item := range items {
-				rs, err := evalFilter(f.builtinArgs[0], item)
+				rs, err := evalFilter(f.builtinArgs[0], item, ctx)
 				if err != nil {
 					continue
 				}
@@ -1520,7 +1560,7 @@ func evalBuiltin(f *filter, input *Value) ([]*Value, error) {
 		}
 		if len(f.builtinArgs) > 0 {
 			for _, item := range items {
-				rs, err := evalFilter(f.builtinArgs[0], item)
+				rs, err := evalFilter(f.builtinArgs[0], item, ctx)
 				if err != nil {
 					return []*Value{{kind: kindBool, boolVal: false}}, nil
 				}
@@ -1543,13 +1583,13 @@ func evalBuiltin(f *filter, input *Value) ([]*Value, error) {
 		var from, to, step float64
 		step = 1
 		if len(f.builtinArgs) == 1 {
-			rs, _ := evalFilter(f.builtinArgs[0], input)
+			rs, _ := evalFilter(f.builtinArgs[0], input, ctx)
 			if len(rs) > 0 {
 				to = rs[0].numFloat
 			}
 		} else if len(f.builtinArgs) >= 2 {
-			rs0, _ := evalFilter(f.builtinArgs[0], input)
-			rs1, _ := evalFilter(f.builtinArgs[1], input)
+			rs0, _ := evalFilter(f.builtinArgs[0], input, ctx)
+			rs1, _ := evalFilter(f.builtinArgs[1], input, ctx)
 			if len(rs0) > 0 {
 				from = rs0[0].numFloat
 			}
@@ -1557,7 +1597,7 @@ func evalBuiltin(f *filter, input *Value) ([]*Value, error) {
 				to = rs1[0].numFloat
 			}
 			if len(f.builtinArgs) >= 3 {
-				rs2, _ := evalFilter(f.builtinArgs[2], input)
+				rs2, _ := evalFilter(f.builtinArgs[2], input, ctx)
 				if len(rs2) > 0 {
 					step = rs2[0].numFloat
 				}
@@ -1574,12 +1614,12 @@ func evalBuiltin(f *filter, input *Value) ([]*Value, error) {
 	return []*Value{input}, nil
 }
 
-func evalObjectConstruct(f *filter, input *Value) ([]*Value, error) {
+func evalObjectConstruct(f *filter, input *Value, ctx evalContext) ([]*Value, error) {
 	result := &Value{kind: kindDict, dictVals: make(map[string]*Value)}
 	for _, of := range f.objFields {
 		var key string
 		if of.keyExpr != nil {
-			ks, err := evalFilter(of.keyExpr, input)
+			ks, err := evalFilter(of.keyExpr, input, ctx)
 			if err != nil {
 				return nil, err
 			}
@@ -1590,7 +1630,7 @@ func evalObjectConstruct(f *filter, input *Value) ([]*Value, error) {
 		} else {
 			key = of.key
 		}
-		vals, err := evalFilter(of.valueExp, input)
+		vals, err := evalFilter(of.valueExp, input, ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -1608,12 +1648,12 @@ func evalObjectConstruct(f *filter, input *Value) ([]*Value, error) {
 	return []*Value{result}, nil
 }
 
-func evalBinOp(f *filter, input *Value) ([]*Value, error) {
-	lefts, err := evalFilter(f.left, input)
+func evalBinOp(f *filter, input *Value, ctx evalContext) ([]*Value, error) {
+	lefts, err := evalFilter(f.left, input, ctx)
 	if err != nil {
 		return nil, err
 	}
-	rights, err := evalFilter(f.right, input)
+	rights, err := evalFilter(f.right, input, ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1789,13 +1829,13 @@ func sortValues(arr []*Value) {
 	}
 }
 
-func sortValuesByFilter(arr []*Value, f *filter) {
+func sortValuesByFilter(arr []*Value, f *filter, ctx evalContext) {
 	// insertion sort for simplicity
 	n := len(arr)
 	for i := 1; i < n; i++ {
 		for j := i; j > 0; j-- {
-			lk, _ := evalFilter(f, arr[j])
-			rk, _ := evalFilter(f, arr[j-1])
+			lk, _ := evalFilter(f, arr[j], ctx)
+			rk, _ := evalFilter(f, arr[j-1], ctx)
 			if len(lk) == 0 || len(rk) == 0 {
 				break
 			}

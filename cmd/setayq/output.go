@@ -12,11 +12,30 @@ import (
 
 // outputOptions controls how values are printed.
 type outputOptions struct {
-	compact   bool
-	rawOutput bool
-	sortKeys  bool
-	toJSON    bool
-	indent    string
+	compact     bool
+	rawOutput   bool
+	sortKeys    bool
+	toJSON      bool
+	setAsObject bool // JSON output: render kindSet as {"key":true} instead of ["key"]
+	indent      string
+	color       bool // emit ANSI color escape sequences
+}
+
+// ---- ANSI color helpers ----
+
+const (
+	ansiReset  = "\033[0m"
+	ansiKey    = "\033[36m" // cyan  — dict/set keys
+	ansiStr    = "\033[32m" // green — string values
+	ansiNum    = "\033[33m" // yellow — numbers
+	ansiKw     = "\033[35m" // magenta — true/false/null/timestamps
+)
+
+func colorize(color, s string, useColor bool) string {
+	if !useColor {
+		return s
+	}
+	return color + s + ansiReset
 }
 
 // ---- setay output ----
@@ -26,10 +45,10 @@ func printSetay(v *Value, opts outputOptions) error {
 		v = v.sortedCopy()
 	}
 	if opts.compact {
-		s := valueToSetayCompact(v, opts.rawOutput)
+		s := valueToSetayCompact(v, opts.rawOutput, opts.color)
 		fmt.Println(s)
 	} else {
-		s := valueToSetayPretty(v, 0, opts.indent, opts.rawOutput)
+		s := valueToSetayPretty(v, 0, opts.indent, opts.rawOutput, opts.color)
 		fmt.Print(s)
 		if !strings.HasSuffix(s, "\n") {
 			fmt.Println()
@@ -39,67 +58,67 @@ func printSetay(v *Value, opts outputOptions) error {
 }
 
 func valueToSetayString(v *Value) string {
-	return valueToSetayCompact(v, false)
+	return valueToSetayCompact(v, false, false)
 }
 
-func valueToSetayCompact(v *Value, raw bool) string {
+func valueToSetayCompact(v *Value, raw bool, color bool) string {
 	switch v.kind {
 	case kindNull:
-		return "null"
+		return colorize(ansiKw, "null", color)
 	case kindBool:
 		if v.boolVal {
-			return "true"
+			return colorize(ansiKw, "true", color)
 		}
-		return "false"
+		return colorize(ansiKw, "false", color)
 	case kindNumber:
-		return formatNumber(v.numFloat)
+		return colorize(ansiNum, formatNumber(v.numFloat), color)
 	case kindString:
 		if raw {
-			return v.strVal
+			return colorize(ansiStr, v.strVal, color)
 		}
-		return escapeSetayString(v.strVal)
+		return colorize(ansiStr, escapeSetayString(v.strVal), color)
 	case kindArray:
 		var parts []string
 		for _, item := range v.arrVal {
-			parts = append(parts, valueToSetayCompact(item, false))
+			parts = append(parts, valueToSetayCompact(item, false, color))
 		}
 		return "[ " + strings.Join(parts, ", ") + " ]"
 	case kindDict:
 		var parts []string
 		for _, k := range v.dictKeys {
-			parts = append(parts, formatKey(k)+" = "+valueToSetayCompact(v.dictVals[k], false))
+			parts = append(parts, colorize(ansiKey, formatKey(k), color)+" = "+valueToSetayCompact(v.dictVals[k], false, color))
 		}
 		return "{ " + strings.Join(parts, "; ") + " }"
 	case kindSet:
 		var parts []string
 		for _, k := range v.setKeys {
-			parts = append(parts, formatKey(k)+"=")
+			parts = append(parts, colorize(ansiKey, formatKey(k), color)+"=")
 		}
 		return "{ " + strings.Join(parts, "; ") + " }"
 	case kindTimestamp:
-		return `UtcTs("` + v.strVal + `")`
+		return colorize(ansiKw, `UtcTs("`+v.strVal+`")`, color)
 	case kindVarRef:
 		return "${" + v.varName + "}"
 	}
-	return "null"
+	return colorize(ansiKw, "null", color)
 }
 
-func valueToSetayPretty(v *Value, depth int, indent string, raw bool) string {
+func valueToSetayPretty(v *Value, depth int, indent string, raw bool, color bool) string {
 	switch v.kind {
 	case kindNull:
-		return "null\n"
+		return colorize(ansiKw, "null", color) + "\n"
 	case kindBool:
 		if v.boolVal {
-			return "true\n"
+			return colorize(ansiKw, "true", color) + "\n"
 		}
-		return "false\n"
+		return colorize(ansiKw, "false", color) + "\n"
 	case kindNumber:
-		return formatNumber(v.numFloat) + "\n"
+		return colorize(ansiNum, formatNumber(v.numFloat), color) + "\n"
 	case kindString:
 		if raw {
-			return v.strVal + "\n"
+			return colorize(ansiStr, v.strVal, color) + "\n"
 		}
-		return escapeSetayString(v.strVal) + "\n"
+		return colorize(ansiStr, escapeSetayString(v.strVal), color) + "\n"
 	case kindArray:
 		if len(v.arrVal) == 0 {
 			return "[]\n"
@@ -108,7 +127,7 @@ func valueToSetayPretty(v *Value, depth int, indent string, raw bool) string {
 		sb.WriteString("[\n")
 		for _, item := range v.arrVal {
 			sb.WriteString(strings.Repeat(indent, depth+1))
-			s := valueToSetayPretty(item, depth+1, indent, false)
+			s := valueToSetayPretty(item, depth+1, indent, false, color)
 			sb.WriteString(strings.TrimRight(s, "\n"))
 			sb.WriteString(",\n")
 		}
@@ -124,10 +143,10 @@ func valueToSetayPretty(v *Value, depth int, indent string, raw bool) string {
 		ind := strings.Repeat(indent, depth+1)
 		for i, k := range v.dictKeys {
 			sb.WriteString(ind)
-			sb.WriteString(formatKey(k))
+			sb.WriteString(colorize(ansiKey, formatKey(k), color))
 			sb.WriteString(" = ")
 			val := v.dictVals[k]
-			s := valueToSetayPretty(val, depth+1, indent, false)
+			s := valueToSetayPretty(val, depth+1, indent, false, color)
 			sb.WriteString(strings.TrimRight(s, "\n"))
 			if i < len(v.dictKeys)-1 {
 				sb.WriteString(";")
@@ -146,18 +165,18 @@ func valueToSetayPretty(v *Value, depth int, indent string, raw bool) string {
 		ind := strings.Repeat(indent, depth+1)
 		for _, k := range v.setKeys {
 			sb.WriteString(ind)
-			sb.WriteString(formatKey(k))
+			sb.WriteString(colorize(ansiKey, formatKey(k), color))
 			sb.WriteString("=;\n")
 		}
 		sb.WriteString(strings.Repeat(indent, depth))
 		sb.WriteString("}\n")
 		return sb.String()
 	case kindTimestamp:
-		return `UtcTs("` + v.strVal + `")` + "\n"
+		return colorize(ansiKw, `UtcTs("`+v.strVal+`")`, color) + "\n"
 	case kindVarRef:
 		return "${" + v.varName + "}\n"
 	}
-	return "null\n"
+	return colorize(ansiKw, "null", color) + "\n"
 }
 
 func formatKey(k string) string {
@@ -236,7 +255,7 @@ func valueToJSON(v *Value, opts outputOptions) ([]byte, error) {
 }
 
 func valueToJSONBytes(v *Value, opts outputOptions) ([]byte, error) {
-	raw := valueToJSONInterface(v, opts.sortKeys)
+	raw := valueToJSONInterface(v, opts)
 	if opts.compact {
 		return json.Marshal(raw)
 	}
@@ -247,7 +266,7 @@ func valueToJSONBytes(v *Value, opts outputOptions) ([]byte, error) {
 	return json.MarshalIndent(raw, "", indent)
 }
 
-func valueToJSONInterface(v *Value, sortKeys bool) interface{} {
+func valueToJSONInterface(v *Value, opts outputOptions) interface{} {
 	switch v.kind {
 	case kindNull:
 		return nil
@@ -263,22 +282,30 @@ func valueToJSONInterface(v *Value, sortKeys bool) interface{} {
 	case kindArray:
 		arr := make([]interface{}, len(v.arrVal))
 		for i, item := range v.arrVal {
-			arr[i] = valueToJSONInterface(item, sortKeys)
+			arr[i] = valueToJSONInterface(item, opts)
 		}
 		return arr
 	case kindDict:
 		keys := v.dictKeys
-		if sortKeys {
+		if opts.sortKeys {
 			keys = make([]string, len(v.dictKeys))
 			copy(keys, v.dictKeys)
 			sort.Strings(keys)
 		}
 		m := make(map[string]interface{}, len(keys))
 		for _, k := range keys {
-			m[k] = valueToJSONInterface(v.dictVals[k], sortKeys)
+			m[k] = valueToJSONInterface(v.dictVals[k], opts)
 		}
 		return m
 	case kindSet:
+		if opts.setAsObject {
+			// Render set as {"key1": true, "key2": true}
+			m := make(map[string]interface{}, len(v.setKeys))
+			for _, k := range v.setKeys {
+				m[k] = true
+			}
+			return m
+		}
 		// default: output as array of keys
 		arr := make([]interface{}, len(v.setKeys))
 		for i, k := range v.setKeys {

@@ -20,15 +20,22 @@ Query and transform setay-format structured data, similar to jq.
 If no file is given, or the file is "-", input is read from stdin.
 
 Options:
-  -c, --compact-output     Output on a single line
-  -r, --raw-output         Output strings without quotes
-  -n, --null-input         Use null as input (do not read files)
-  -S, --sort-keys          Sort dict keys alphabetically
-      --to-json            Output in JSON format instead of setay
-      --resolve-vars       Resolve ${VAR} references from environment
-      --tab                Indent with tab (default)
-      --indent <n>         Indent with n spaces
-  -e, --exit-status        Exit with non-zero if no output or false/null
+  -c, --compact-output        Output on a single line
+  -r, --raw-output            Output strings without quotes
+  -n, --null-input            Use null as input (do not read files)
+  -s, --slurp                 Read all inputs into an array before filtering
+  -S, --sort-keys             Sort dict keys alphabetically
+      --to-json               Output in JSON format instead of setay
+      --output-set-as-object  JSON output: render Set as {"key":true} instead of ["key"]
+      --resolve-vars          Resolve ${VAR} references from environment
+      --tab                   Indent with tab (default)
+      --indent <n>            Indent with n spaces
+  -e, --exit-status           Exit with non-zero if no output or false/null
+  -C, --color-output          Colorize output (default when stdout is a TTY)
+  -M, --monochrome-output     Disable colorized output
+      --arg <name> <value>    Bind string value to $name in filter
+      --argjson <name> <val>  Bind JSON-parsed value to $name in filter
+  -f, --from-file <file>      Read filter from file
 
 Filter examples:
   .                        Identity (prints the whole document)
@@ -41,21 +48,57 @@ Filter examples:
   length                   Length of a string/list/dict
   type                     Type of the value
   select(.enabled)         Filter: pass through if truthy
+  $myvar                   Reference a variable bound with --arg
 `
 
 func main() {
 	var (
-		compact     bool
-		rawOutput   bool
-		nullInput   bool
-		sortKeys    bool
-		toJSON      bool
-		resolveVars bool
-		useTab      bool
-		indentN     int
-		exitStatus  bool
-		fromFile    string
+		compact      bool
+		rawOutput    bool
+		nullInput    bool
+		slurp        bool
+		sortKeys     bool
+		toJSON       bool
+		setAsObject  bool
+		resolveVars  bool
+		useTab       bool
+		indentN      int
+		exitStatus   bool
+		colorOutput  bool
+		monoOutput   bool
+		fromFile     string
 	)
+
+	// Pre-scan os.Args for --arg / --argjson before flag.Parse,
+	// because flag does not support repeated key-value pair flags.
+	argsMap := make(map[string]*Value)
+	cleanArgs := []string{}
+	rawArgs := os.Args[1:]
+	for i := 0; i < len(rawArgs); i++ {
+		switch rawArgs[i] {
+		case "--arg":
+			if i+2 < len(rawArgs) {
+				name := rawArgs[i+1]
+				val := rawArgs[i+2]
+				argsMap[name] = &Value{kind: kindString, strVal: val}
+				i += 2
+			}
+		case "--argjson":
+			if i+2 < len(rawArgs) {
+				name := rawArgs[i+1]
+				raw := rawArgs[i+2]
+				v, err := jsonToValue(raw)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "setayq: --argjson %s: invalid JSON: %v\n", name, err)
+					os.Exit(2)
+				}
+				argsMap[name] = v
+				i += 2
+			}
+		default:
+			cleanArgs = append(cleanArgs, rawArgs[i])
+		}
+	}
 
 	fs := flag.NewFlagSet("setayq", flag.ContinueOnError)
 	fs.BoolVar(&compact, "c", false, "compact output")
@@ -64,20 +107,27 @@ func main() {
 	fs.BoolVar(&rawOutput, "raw-output", false, "raw output")
 	fs.BoolVar(&nullInput, "n", false, "null input")
 	fs.BoolVar(&nullInput, "null-input", false, "null input")
+	fs.BoolVar(&slurp, "s", false, "slurp")
+	fs.BoolVar(&slurp, "slurp", false, "slurp")
 	fs.BoolVar(&sortKeys, "S", false, "sort keys")
 	fs.BoolVar(&sortKeys, "sort-keys", false, "sort keys")
 	fs.BoolVar(&toJSON, "to-json", false, "output as JSON")
+	fs.BoolVar(&setAsObject, "output-set-as-object", false, "render Set as object in JSON output")
 	fs.BoolVar(&resolveVars, "resolve-vars", false, "resolve ${VAR} from environment")
 	fs.BoolVar(&useTab, "tab", false, "indent with tab")
 	fs.IntVar(&indentN, "indent", -1, "indent with n spaces")
 	fs.BoolVar(&exitStatus, "e", false, "exit with non-zero on false/null output")
 	fs.BoolVar(&exitStatus, "exit-status", false, "exit with non-zero on false/null output")
+	fs.BoolVar(&colorOutput, "C", false, "color output")
+	fs.BoolVar(&colorOutput, "color-output", false, "color output")
+	fs.BoolVar(&monoOutput, "M", false, "monochrome output")
+	fs.BoolVar(&monoOutput, "monochrome-output", false, "monochrome output")
 	fs.StringVar(&fromFile, "f", "", "read filter from file")
 	fs.StringVar(&fromFile, "from-file", "", "read filter from file")
 
 	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }
 
-	if err := fs.Parse(os.Args[1:]); err != nil {
+	if err := fs.Parse(cleanArgs); err != nil {
 		os.Exit(2)
 	}
 
@@ -95,6 +145,15 @@ func main() {
 		indentStr = "\t"
 	}
 
+	// Determine color: auto-detect TTY unless overridden
+	useColor := isTTY(os.Stdout)
+	if colorOutput {
+		useColor = true
+	}
+	if monoOutput {
+		useColor = false
+	}
+
 	// Load filter expression
 	var filterExpr string
 	if fromFile != "" {
@@ -104,31 +163,34 @@ func main() {
 			os.Exit(2)
 		}
 		filterExpr = strings.TrimSpace(string(data))
-		// files are the remaining args
 	} else {
 		filterExpr = args[0]
 		args = args[1:]
 	}
 
 	// Parse the filter
-	filter, err := parseFilter(filterExpr)
+	fil, err := parseFilter(filterExpr)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "setayq: invalid filter: %v\n", err)
 		os.Exit(3)
 	}
 
 	outputOpts := outputOptions{
-		compact:   compact,
-		rawOutput: rawOutput,
-		sortKeys:  sortKeys,
-		toJSON:    toJSON,
-		indent:    indentStr,
+		compact:     compact,
+		rawOutput:   rawOutput,
+		sortKeys:    sortKeys,
+		toJSON:      toJSON,
+		setAsObject: setAsObject,
+		indent:      indentStr,
+		color:       useColor,
 	}
+
+	ctx := evalContext{args: argsMap}
 
 	// Determine input sources
 	var inputs []string
 	if nullInput {
-		inputs = nil // will use null as input
+		inputs = nil
 	} else if len(args) == 0 || (len(args) == 1 && args[0] == "-") {
 		inputs = []string{"-"}
 	} else {
@@ -138,7 +200,18 @@ func main() {
 	hasOutput := false
 	lastOutputFalsy := false
 
-	processInput := func(r io.Reader) {
+	printResults := func(results []*Value) {
+		for _, result := range results {
+			hasOutput = true
+			lastOutputFalsy = isFalsy(result)
+			if err := printValue(result, outputOpts); err != nil {
+				fmt.Fprintf(os.Stderr, "setayq: output error: %v\n", err)
+				os.Exit(1)
+			}
+		}
+	}
+
+	readAndParse := func(r io.Reader) *Value {
 		data, err := io.ReadAll(r)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "setayq: read error: %v\n", err)
@@ -149,57 +222,70 @@ func main() {
 			fmt.Fprintf(os.Stderr, "setayq: parse error: %v\n", err)
 			os.Exit(3)
 		}
+		return val
+	}
 
-		results, evalErr := evalFilter(filter, val)
-		if evalErr != nil {
-			fmt.Fprintf(os.Stderr, "setayq: %v\n", evalErr)
-			os.Exit(5)
+	openInput := func(name string) (*os.File, func()) {
+		if name == "-" {
+			return os.Stdin, func() {}
 		}
-
-		for _, result := range results {
-			hasOutput = true
-			lastOutputFalsy = isFalsy(result)
-			if err := printValue(result, outputOpts); err != nil {
-				fmt.Fprintf(os.Stderr, "setayq: output error: %v\n", err)
-				os.Exit(1)
-			}
+		f, err := os.Open(name)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "setayq: cannot open %s: %v\n", name, err)
+			os.Exit(2)
 		}
+		return f, func() { f.Close() }
 	}
 
 	if nullInput {
-		// Feed null value as input
-		results, evalErr := evalFilter(filter, &Value{kind: kindNull})
+		results, evalErr := evalFilter(fil, &Value{kind: kindNull}, ctx)
 		if evalErr != nil {
 			fmt.Fprintf(os.Stderr, "setayq: %v\n", evalErr)
 			os.Exit(5)
 		}
-		for _, result := range results {
-			hasOutput = true
-			lastOutputFalsy = isFalsy(result)
-			if err := printValue(result, outputOpts); err != nil {
-				fmt.Fprintf(os.Stderr, "setayq: output error: %v\n", err)
-				os.Exit(1)
-			}
+		printResults(results)
+	} else if slurp {
+		// Collect all parsed values into one array
+		var collected []*Value
+		for _, input := range inputs {
+			f, done := openInput(input)
+			val := readAndParse(f)
+			done()
+			collected = append(collected, val)
 		}
+		slurped := &Value{kind: kindArray, arrVal: collected}
+		results, evalErr := evalFilter(fil, slurped, ctx)
+		if evalErr != nil {
+			fmt.Fprintf(os.Stderr, "setayq: %v\n", evalErr)
+			os.Exit(5)
+		}
+		printResults(results)
 	} else {
 		for _, input := range inputs {
-			if input == "-" {
-				processInput(os.Stdin)
-			} else {
-				f, err := os.Open(input)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "setayq: cannot open %s: %v\n", input, err)
-					os.Exit(2)
-				}
-				processInput(f)
-				f.Close()
+			f, done := openInput(input)
+			val := readAndParse(f)
+			done()
+			results, evalErr := evalFilter(fil, val, ctx)
+			if evalErr != nil {
+				fmt.Fprintf(os.Stderr, "setayq: %v\n", evalErr)
+				os.Exit(5)
 			}
+			printResults(results)
 		}
 	}
 
 	if exitStatus && (!hasOutput || lastOutputFalsy) {
 		os.Exit(5)
 	}
+}
+
+// isTTY reports whether f is connected to a terminal.
+func isTTY(f *os.File) bool {
+	fi, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
 }
 
 // parseSetayToValue reads raw setay text and converts it to an AST-based Value.
