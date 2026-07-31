@@ -304,19 +304,19 @@ func (u *unmarshaler) setNumber(target reflect.Value, text string) error {
 		}
 		target.SetFloat(f)
 	case reflect.Interface:
-		// Determine type: if contains '.', 'e', 'E' → float, else int
-		if strings.ContainsAny(text, ".eE") {
-			f, err := parseFloat(text)
-			if err != nil {
-				return fmt.Errorf("setay: %w", err)
-			}
-			target.Set(reflect.ValueOf(f))
-		} else {
+		// Pick int64 or float64 based on the literal's grammar class.
+		if isIntegerText(text) {
 			n, err := parseInteger(text)
 			if err != nil {
 				return fmt.Errorf("setay: %w", err)
 			}
 			target.Set(reflect.ValueOf(n))
+		} else {
+			f, err := parseFloat(text)
+			if err != nil {
+				return fmt.Errorf("setay: %w", err)
+			}
+			target.Set(reflect.ValueOf(f))
 		}
 	default:
 		return fmt.Errorf("setay: cannot set number into %s", target.Type())
@@ -780,6 +780,24 @@ func (u *unmarshaler) setFromString(target reflect.Value, s string) error {
 	default:
 		return fmt.Errorf("setay: cannot set variable (string %q) into %s", s, target.Type())
 	}
+}
+
+// isIntegerText reports whether a numeric literal is an integer (as opposed to
+// a float). It mirrors the grammar's classification: a prefixed literal
+// (0x/0X, 0b/0B, 0o/0O, 0d/0D) is always an integer, even when its hex digits
+// include 'e'/'E' (e.g. 0xE, 0xBEEF). Only a prefix-less token containing '.',
+// 'e', or 'E' is a float. This is used when decoding into an interface{} target,
+// where setay must choose a concrete Go type (int64 vs float64) on its own.
+func isIntegerText(s string) bool {
+	s = strings.TrimPrefix(s, "-")
+	switch {
+	case strings.HasPrefix(s, "0x"), strings.HasPrefix(s, "0X"),
+		strings.HasPrefix(s, "0b"), strings.HasPrefix(s, "0B"),
+		strings.HasPrefix(s, "0o"), strings.HasPrefix(s, "0O"),
+		strings.HasPrefix(s, "0d"), strings.HasPrefix(s, "0D"):
+		return true
+	}
+	return !strings.ContainsAny(s, ".eE")
 }
 
 // parseInteger parses an integer string, handling prefixes.
