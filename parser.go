@@ -72,14 +72,24 @@ type PackratParser struct {
 	memoCount   int
 	furthestPos int    // furthest position reached during parsing
 	furthestMsg string // error message at the furthest position
+	lineOffsets []int  // positions of each '\n' in input (pre-computed)
 }
 
 // NewPackratParser creates a new parser.
 func NewPackratParser(input string) *PackratParser {
+	runes := []rune(input)
+	// Pre-compute line offset table: record position of every '\n'.
+	var offsets []int
+	for i, r := range runes {
+		if r == '\n' {
+			offsets = append(offsets, i)
+		}
+	}
 	return &PackratParser{
-		input:       []rune(input),
+		input:       runes,
 		memo:        make(map[string]map[int]*memoEntry),
 		furthestPos: -1,
+		lineOffsets: offsets,
 	}
 }
 
@@ -125,13 +135,17 @@ func (p *PackratParser) getMemo(rule string, pos int) (*memoEntry, bool) {
 }
 
 func (p *PackratParser) lineAt(pos int) LineNum {
-	line := LineNum(1)
-	for i := 0; i < pos && i < len(p.input); i++ {
-		if p.input[i] == '\n' {
-			line++
+	// Binary search: find how many '\n' characters appear before pos.
+	lo, hi := 0, len(p.lineOffsets)
+	for lo < hi {
+		mid := lo + (hi-lo)/2
+		if p.lineOffsets[mid] < pos {
+			lo = mid + 1
+		} else {
+			hi = mid
 		}
 	}
-	return line
+	return LineNum(lo + 1)
 }
 
 func (p *PackratParser) makeAuthority(start, end int) *Authority {
@@ -726,6 +740,14 @@ type DefSetayLineCommentShebang struct {
 }
 
 func (n *DefSetayLineCommentShebang) GetAuthority() *Authority { return n.Authority }
+
+// DefSetayLineCommentEmpty is the parse result of the SetayLineCommentEmpty rule.
+type DefSetayLineCommentEmpty struct {
+	Authority *Authority
+	AnonymousField1 StringFromSource
+}
+
+func (n *DefSetayLineCommentEmpty) GetAuthority() *Authority { return n.Authority }
 
 // DefSetayLineCommentChar is the parse result of the SetayLineCommentChar rule.
 type DefSetayLineCommentChar struct {
@@ -4852,6 +4874,14 @@ func (p *PackratParser) parseSetayComment(pos int) (*DefSetayComment, int, error
 			}
 		}
 		if !choiceMatched {
+			node, end, err := p.parseSetayLineCommentEmpty(pos)
+			if err == nil {
+				result.AnonymousField1 = node
+				pos = end
+				choiceMatched = true
+			}
+		}
+		if !choiceMatched {
 			err := fmt.Errorf("line %d: no choice matched for field AnonymousField1", p.lineAt(pos))
 			p.memoize("SetayComment", startPos, nil, pos, err)
 			return nil, pos, err
@@ -5075,6 +5105,57 @@ func (p *PackratParser) parseSetayLineCommentShebang(pos int) (*DefSetayLineComm
 	}
 	result.Authority = p.makeAuthority(startPos, pos)
 	p.memoize("SetayLineCommentShebang", startPos, result, pos, nil)
+	return result, pos, nil
+}
+
+func (p *PackratParser) parseSetayLineCommentEmpty(pos int) (*DefSetayLineCommentEmpty, int, error) {
+	if m, ok := p.getMemo("SetayLineCommentEmpty", pos); ok {
+		if m.err != nil {
+			return nil, m.end, m.err
+		}
+		return m.node.(*DefSetayLineCommentEmpty), m.end, nil
+	}
+
+	if err := p.enterRule(); err != nil {
+		return nil, pos, err
+	}
+	defer p.leaveRule()
+
+	startPos := pos
+	result := &DefSetayLineCommentEmpty{}
+
+	// Field: AnonymousField1 (Literal "#")
+	{
+		expected := []rune("#")
+		if pos+len(expected) > len(p.input) {
+			err := fmt.Errorf("line %d: expected %q, got EOF", p.lineAt(pos), "#")
+			p.memoize("SetayLineCommentEmpty", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+		matched := true
+		for i, r := range expected {
+			if p.input[pos+i] != r { matched = false; break }
+		}
+		if !matched {
+			err := fmt.Errorf("line %d: expected %q", p.lineAt(pos), "#")
+			p.memoize("SetayLineCommentEmpty", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+		result.AnonymousField1 = p.makeStringFromSource(pos, pos+len(expected))
+		pos += len(expected)
+	}
+	// Field: AnonymousField2 (NotFollowedBy)
+	{
+		_, _, nfErr := p.parseSetayLineCommentChar(pos)
+		if nfErr == nil {
+			err := fmt.Errorf("line %d: notFollowedBy matched (SetayLineCommentChar)", p.lineAt(pos))
+			p.memoize("SetayLineCommentEmpty", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+		// notFollowedBy succeeded: pos unchanged
+	}
+	result.Authority = p.makeAuthority(startPos, pos)
+	p.memoize("SetayLineCommentEmpty", startPos, result, pos, nil)
 	return result, pos, nil
 }
 

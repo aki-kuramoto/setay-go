@@ -107,11 +107,13 @@ Examples: `name`, `is-student`, `is_neet`, `Address`, `HEIGHT` can all be used w
 
 ## Single-Line Comments
 
-Three forms of single-line comments are available, all starting with `#`:
+Four forms of single-line comments are available, all starting with `#`:
 
 - `# ` — hash followed by a space
 - `#\t` — hash followed by a horizontal tab (U+0009)
 - `##` — two consecutive hashes
+- `#` immediately followed by a newline (LF, CRLF, or a lone CR) or by
+  end-of-input — an empty comment (a comment-only `#` line).
 - Any other character following `#` does not form a single-line comment.
 
 ## `#!` Reserved Expression

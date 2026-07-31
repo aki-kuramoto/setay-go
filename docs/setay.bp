@@ -456,13 +456,16 @@ def SetayUtcTs
 #      ignored until end of line. While it behaves like a comment, it should
 #      not be used as a general-purpose comment.
 #   5. "#{" ~ "}#": multi-line comment (non-nesting)
+#   6. "#" immediately followed by a newline (CR, LF, or CRLF) or by
+#      end-of-input: an empty single-line comment.
 def SetayComment
 {
 	_: SetayMultiLineComment
 	   or SetayLineCommentHash
 	   or SetayLineCommentSpace
 	   or SetayLineCommentTab
-	   or SetayLineCommentShebang;
+	   or SetayLineCommentShebang
+	   or SetayLineCommentEmpty;
 };
 
 # "# " (hash + space) single-line comment
@@ -491,6 +494,17 @@ def SetayLineCommentShebang
 {
 	_: "#!";
 	_: zero-or-more<SetayLineCommentChar>;
+};
+
+# "#" immediately followed by a newline or end-of-input: an empty comment.
+# It consumes only the "#"; the following newline (if any) is handled by
+# SetaySpacingItem. The not-followed-by<SetayLineCommentChar> guard means the
+# next character must be a newline or absent (end-of-input); a "#" followed by
+# any other character (e.g. "#foo") is still a parse error.
+def SetayLineCommentEmpty
+{
+	_: '#';
+	_: not-followed-by<SetayLineCommentChar>;
 };
 
 # Single-line comment body character (everything except newline)
@@ -566,12 +580,14 @@ def SetayVarFallback
 	next: zero-or-one<SetayVarFallback>;
 };
 
-# A fallback value: either another variable reference, a bare variable name,
-# or a literal value (number or string).
+# A fallback value: another variable reference, a boolean literal, a bare
+# variable name, or a literal value (number or string).
+# SetayTrue/SetayFalse must come BEFORE SetayVarName so that the words "true"
+# and "false" resolve to booleans instead of being read as variable names.
 # SetayVarName must come BEFORE SetayNumber/SetayString to avoid ambiguity.
 def SetayVarOrValue
 {
-	_: SetayVarRef or SetayVarName or SetayNumber or SetayString;
+	_: SetayVarRef or SetayTrue or SetayFalse or SetayVarName or SetayNumber or SetayString;
 };
 
 # ======================================================================
