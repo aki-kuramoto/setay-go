@@ -1,0 +1,24 @@
+# file header comment
+# second header line
+{
+	title = "My Service";
+	
+	# --- server settings ---
+	server =
+	{
+		host = "0.0.0.0";
+		port = 9090;
+		flags = [ "a", "b" ];
+	};
+	
+	# --- feature toggles ---
+	verbose = true;
+	retries = 0x0A;
+	
+	tags =
+	[
+		# primary
+		"web",
+		"api",
+	];
+}

@@ -1,0 +1,15 @@
+{
+# leading one
+## leading two
+#! shebang note
+#
+  name =   "app" ;
+ # between name and port
+port=8080 ;
+nested ={
+# nested leading
+enabled =true;
+# nested trailing
+} ;
+# top trailing
+}

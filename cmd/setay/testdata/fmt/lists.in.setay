@@ -1,0 +1,15 @@
+{
+short = [1,2,3];
+withcomments = [
+# first
+10,
+# second
+20,
+30,
+];
+strs = [ "a","b" ,"c" ];
+nested = [
+[1, 2],
+[3, 4],
+];
+}

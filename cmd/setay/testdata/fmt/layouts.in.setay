@@ -1,0 +1,23 @@
+{
+inline_dict = {a=1;b=2};
+block_dict = {
+x=1;
+y = 2;
+};
+inline_list = [1,2,3];
+block_list = [
+10,
+20,
+];
+empty_inline = { };
+empty_split = {
+};
+nested_inline = [[1,2],[3,4]];
+mixed = {
+tags = ["a","b"];
+matrix = [
+[1,2],
+[3,4],
+];
+};
+}
