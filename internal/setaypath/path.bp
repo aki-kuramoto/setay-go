@@ -1,0 +1,108 @@
+# Grammar for setay value-addressing paths: the single-value subset of setayq's
+# (jq-like) filter syntax, used to navigate and edit a setay Document.
+# Examples: .name  .server.host  .servers[0]  .ports[-1]  .["a.b"]
+# Streaming/query constructs (.[] , pipes, functions, ',') are intentionally NOT
+# part of this grammar; those belong to setayq's full filter language.
+package setaypath;
+
+# A path is one or more steps. Each step selects a dict field or a list index.
+root-def SetayPath
+{
+	steps: one-or-more<SetayPathStep>;
+};
+
+def SetayPathStep
+{
+	_: SetayPathDotField
+	   or SetayPathDotBracket
+	   or SetayPathBracket;
+};
+
+# ".name" or ".\"quoted key\""
+def SetayPathDotField
+{
+	_: '.';
+	name: SetayPathName;
+};
+
+def SetayPathName
+{
+	_: SetayPathBareName or SetayPathQuoted;
+};
+
+# Bare identifier: [A-Za-z_] then [A-Za-z0-9_-]* (matches setayq's lexIdent).
+def SetayPathBareName
+{
+	lead: SetayPathNameLead;
+	tail: zero-or-more<SetayPathNameCont>;
+};
+
+def SetayPathNameLead
+{
+	_: char-range<'a','z'> or char-range<'A','Z'> or '_';
+};
+
+def SetayPathNameCont
+{
+	_: char-range<'a','z'> or char-range<'A','Z'> or char-range<'0','9'> or '_' or '-';
+};
+
+# Double-quoted key with backslash escapes: "a.b", "with space".
+def SetayPathQuoted
+{
+	_: '"';
+	chars: zero-or-more<SetayPathQuotedChar>;
+	_: '"';
+};
+
+def SetayPathQuotedChar
+{
+	_: SetayPathEscaped or SetayPathQuotedNormal;
+};
+
+def SetayPathEscaped
+{
+	_: '\\';
+	ch: anychar;
+};
+
+def SetayPathQuotedNormal
+{
+	_: anychar-except<'"' or '\\'>;
+};
+
+# ".[...]" — a bracket step written with a leading dot (jq allows ".[0]").
+def SetayPathDotBracket
+{
+	_: '.';
+	bracket: SetayPathBracket;
+};
+
+# "[n]", "[-n]", or "[\"key\"]".
+def SetayPathBracket
+{
+	_: '[';
+	inner: SetayPathBracketInner;
+	_: ']';
+};
+
+def SetayPathBracketInner
+{
+	_: SetayPathIndex or SetayPathQuoted;
+};
+
+def SetayPathIndex
+{
+	sign: zero-or-one<SetayPathMinus>;
+	digits: one-or-more<SetayPathDigit>;
+};
+
+def SetayPathMinus
+{
+	_: '-';
+};
+
+def SetayPathDigit
+{
+	_: char-range<'0','9'>;
+};
