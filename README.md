@@ -317,6 +317,7 @@ The top level of a setay document is always a dict `{ ... }`. Dicts hold key–v
 
 - [Format Specification](docs/setay-format-spec.md) — Full setay format specification
 - [Grammar Definition](docs/setay.bp) — PEG grammar (boompaw format)
+- [Regenerating the Parser](docs/regenerating-the-parser.md) — how the parser is generated, and the two generated copies that must be kept in sync
 
 ## License
 
@@ -637,6 +638,7 @@ setay ドキュメントのトップレベルは常にディクト `{ ... }` で
 
 - [形式仕様](docs/setay-format-spec.md) — setay 形式の完全な仕様書
 - [文法定義](docs/setay.bp) — PEG 文法（boompaw 形式）
+- [パーサの再生成](docs/regenerating-the-parser.md) — パーサの生成方法と、同期が必要な2つの生成コピー
 
 ## ライセンス
 

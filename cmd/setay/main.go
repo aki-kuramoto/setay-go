@@ -1,3 +1,12 @@
+// Command setay is the setay CLI (currently: `setay fmt`).
+//
+// This command is a standalone `package main` and does NOT import the
+// github.com/aki-kuramoto/setay-go library. It therefore embeds its OWN copy of
+// the generated parser in cmd/setay/parser.go, separate from the library's
+// ./parser.go. Any grammar change to docs/setay.bp must be regenerated into
+// BOTH files (with -pkg main here and -pkg setay for the library); regenerating
+// only one leaves this command parsing with a stale grammar. See
+// docs/regenerating-the-parser.md.
 package main
 
 import (
