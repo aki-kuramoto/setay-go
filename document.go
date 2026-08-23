@@ -105,14 +105,15 @@ func (d *Document) Field(key string) (*Node, bool) {
 	return d.fieldOf(d.root.Dict, key)
 }
 
-// Get resolves a path from the document root and returns the value there.
+// Get resolves a setay path from the document root and returns the value there.
 //
-// The path syntax is the single-value subset of setayq's (jq-like) filter
-// syntax: it starts with '.', selects dict fields with '.name' (or '."name"' /
-// '.["name"]' for keys that are not bare identifiers), and indexes lists with
-// '[n]' or a negative '[-n]' from the end -- e.g. ".servers[0].host",
-// `.["a.b"].port`, ".ports[-1]". Streaming/query constructs ('.[]', '|',
-// functions, ',') are intentionally not accepted here; those belong to setayq.
+// A path starts with ":/" (the root) and is then "."-separated segments. A
+// segment is a bare key (a LenientIdentifier: [A-Za-z_] then [A-Za-z0-9_-]*, no
+// leading or trailing hyphen), a quoted key (a setay string, ' or ", used for
+// keys that are not bare identifiers; it does not interpolate), or a numeric
+// list index (a negative index counts from the end). Examples:
+// ":/servers.0.host", `:/"a.b".port`, ":/ports.-1", ":/'a${b}'". This is setay's
+// own addressing notation, deliberately not setayq's (jq-like) filter syntax.
 func (d *Document) Get(path string) (*Node, bool) {
 	steps, err := parsePath(path)
 	if err != nil || len(steps) == 0 {
@@ -292,85 +293,95 @@ type pathStep struct {
 	index   int
 }
 
-// parsePath parses the single-value subset of setayq's path syntax into steps.
-// The grammar lives in internal/setaypath/path.bp and the parser is generated
-// from it by boompaw -- there is no second, hand-written path parser to drift
-// out of sync. This function only walks the generated CST into []pathStep.
+// parsePath parses a setay path (":/" root then "."-separated segments) into
+// steps. The grammar lives in internal/setaypath/path.bp and the parser is
+// generated from it by boompaw; this function only walks the generated CST.
 func parsePath(path string) ([]pathStep, error) {
 	root, err := setaypath.Parse(path)
 	if err != nil {
 		return nil, err
 	}
-	steps := make([]pathStep, 0, len(root.Steps))
-	for _, st := range root.Steps {
-		switch v := st.AnonymousField1.(type) {
-		case *setaypath.DefSetayPathDotField:
-			steps = append(steps, pathStep{isField: true, field: pathNameText(v.Name)})
-		case *setaypath.DefSetayPathDotBracket:
-			s, err := pathBracketStep(v.Bracket)
-			if err != nil {
-				return nil, err
-			}
-			steps = append(steps, s)
-		case *setaypath.DefSetayPathBracket:
-			s, err := pathBracketStep(v)
-			if err != nil {
-				return nil, err
-			}
-			steps = append(steps, s)
-		default:
-			return nil, fmt.Errorf("setay: unrecognized step in path %q", path)
+	segs := make([]*setaypath.DefSetayPathSegment, 0, 1+len(root.Rest))
+	segs = append(segs, root.First)
+	for _, sep := range root.Rest {
+		segs = append(segs, sep.Segment)
+	}
+	steps := make([]pathStep, 0, len(segs))
+	for _, seg := range segs {
+		st, err := pathSegmentStep(seg)
+		if err != nil {
+			return nil, err
 		}
+		steps = append(steps, st)
 	}
 	return steps, nil
 }
 
-// pathNameText returns the (decoded) key named by a ".name" or `."key"` step.
-func pathNameText(name *setaypath.DefSetayPathName) string {
-	switch v := name.AnonymousField1.(type) {
-	case *setaypath.DefSetayPathBareName:
-		return v.GetAuthority().Surface
-	case *setaypath.DefSetayPathQuoted:
-		return decodeQuotedKey(v)
-	default:
-		return name.GetAuthority().Surface
-	}
-}
-
-// pathBracketStep converts a "[n]" / "[-n]" / `["key"]` bracket into a step.
-func pathBracketStep(b *setaypath.DefSetayPathBracket) (pathStep, error) {
-	switch v := b.Inner.AnonymousField1.(type) {
+// pathSegmentStep converts one path segment (a bare key, a quoted key, or a
+// numeric index) into a pathStep.
+func pathSegmentStep(seg *setaypath.DefSetayPathSegment) (pathStep, error) {
+	switch v := seg.AnonymousField1.(type) {
 	case *setaypath.DefSetayPathIndex:
 		i, err := strconv.Atoi(v.GetAuthority().Surface)
 		if err != nil {
 			return pathStep{}, err
 		}
 		return pathStep{index: i}, nil
-	case *setaypath.DefSetayPathQuoted:
+	case *setaypath.DefSetayPathBareKey:
+		return pathStep{isField: true, field: v.GetAuthority().Surface}, nil
+	case *setaypath.DefSetayPathQuotedKey:
 		return pathStep{isField: true, field: decodeQuotedKey(v)}, nil
 	default:
-		return pathStep{}, fmt.Errorf("setay: unrecognized bracket content in path")
+		return pathStep{}, fmt.Errorf("setay: unrecognized path segment")
 	}
 }
 
-// decodeQuotedKey unescapes a double-quoted key from a path.
-func decodeQuotedKey(q *setaypath.DefSetayPathQuoted) string {
+// decodeQuotedKey returns the key that a quoted path segment denotes, applying
+// the setay string escape rules. The surrounding quotes (' or ") are ASCII, so
+// they are stripped by byte.
+func decodeQuotedKey(q *setaypath.DefSetayPathQuotedKey) string {
+	s := q.GetAuthority().Surface
+	if len(s) < 2 {
+		return ""
+	}
+	return unescapeKey(s[1 : len(s)-1])
+}
+
+// unescapeKey applies the setay escape table to the inner text of a quoted key.
+// The grammar has already validated every escape, so the hex/unicode slices are
+// always in range.
+func unescapeKey(s string) string {
+	rs := []rune(s)
 	var b strings.Builder
-	for _, c := range q.Chars {
-		switch cc := c.AnonymousField1.(type) {
-		case *setaypath.DefSetayPathEscaped:
-			switch cc.Ch.Surface {
-			case "n":
-				b.WriteByte('\n')
-			case "t":
-				b.WriteByte('\t')
-			case "r":
-				b.WriteByte('\r')
-			default:
-				b.WriteString(cc.Ch.Surface)
-			}
-		case *setaypath.DefSetayPathQuotedNormal:
-			b.WriteString(cc.GetAuthority().Surface)
+	for i := 0; i < len(rs); i++ {
+		if rs[i] != '\\' || i+1 >= len(rs) {
+			b.WriteRune(rs[i])
+			continue
+		}
+		i++
+		switch c := rs[i]; c {
+		case 'n':
+			b.WriteByte('\n')
+		case 'r':
+			b.WriteByte('\r')
+		case 't':
+			b.WriteByte('\t')
+		case '0':
+			b.WriteByte(0)
+		case 'x':
+			n, _ := strconv.ParseInt(string(rs[i+1:i+3]), 16, 32)
+			b.WriteRune(rune(n))
+			i += 2
+		case 'u':
+			n, _ := strconv.ParseInt(string(rs[i+1:i+5]), 16, 32)
+			b.WriteRune(rune(n))
+			i += 4
+		case 'U':
+			n, _ := strconv.ParseInt(string(rs[i+1:i+9]), 16, 32)
+			b.WriteRune(rune(n))
+			i += 8
+		default:
+			b.WriteRune(c) // symbol escape -> the literal symbol
 		}
 	}
 	return b.String()

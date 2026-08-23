@@ -1,8 +1,9 @@
 # setay パス記法 (設計メモ, 進行中)
 
-> これは**進行中**の設計ドキュメントです。決定済みの点と未決の論点を分けて記録します。
-> 文字列/エスケープの仕様は setay.bp / unmarshal.go に**実装済み**。パス記法本体
-> (internal/setaypath/path.bp) の実装はこれから。
+> これは設計ドキュメントです。決定済みの点と未決の論点を分けて記録します。
+> 文字列/エスケープ仕様は setay.bp / unmarshal.go に、パス記法 (`:/` root・`.` 区切り・
+> 数値index・DQ/SQ 引用キー) は internal/setaypath/path.bp + document.go に**実装済み**。
+> 残るのは構造編集の操作 API (別トラック)。
 
 ## 決定: setayq とは別物にする
 

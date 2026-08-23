@@ -48,13 +48,14 @@ func TestDocumentGetRaw(t *testing.T) {
 		t.Fatal(err)
 	}
 	cases := map[string]struct{ raw, kind string }{
-		".name":             {`"app"`, "string"},
-		".port":             {"0xE", "number"},
-		".server.host":      {`"localhost"`, "string"},
-		".server.flags":     {`[ "x", "y", "z" ]`, "list"},
-		".server.flags[0]":  {`"x"`, "string"},
-		".server.flags[-1]": {`"z"`, "string"},
-		`.["a.b"]`:          {"1", "number"},
+		":/name":            {`"app"`, "string"},
+		":/port":            {"0xE", "number"},
+		":/server.host":     {`"localhost"`, "string"},
+		":/server.flags":    {`[ "x", "y", "z" ]`, "list"},
+		":/server.flags.0":  {`"x"`, "string"},
+		":/server.flags.-1": {`"z"`, "string"},
+		`:/"a.b"`:           {"1", "number"},
+		`:/'a.b'`:           {"1", "number"}, // SQ quoted key reaches the same key
 	}
 	for path, want := range cases {
 		n, ok := doc.Get(path)
@@ -78,7 +79,7 @@ func TestDocumentSetRawSingle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := doc.SetRaw(".port", "0x10"); err != nil {
+	if err := doc.SetRaw(":/port", "0x10"); err != nil {
 		t.Fatalf("SetRaw: %v", err)
 	}
 	want := strings.Replace(editSample, "0xE", "0x10", 1)
@@ -92,10 +93,10 @@ func TestDocumentSetRawNestedAndList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := doc.SetRaw(".server.host", `"127.0.0.1"`); err != nil {
+	if err := doc.SetRaw(":/server.host", `"127.0.0.1"`); err != nil {
 		t.Fatalf("SetRaw host: %v", err)
 	}
-	if err := doc.SetRaw(".server.flags[1]", `"Y"`); err != nil {
+	if err := doc.SetRaw(":/server.flags.1", `"Y"`); err != nil {
 		t.Fatalf("SetRaw flag: %v", err)
 	}
 	want := editSample
@@ -138,11 +139,11 @@ func TestDocumentOverlapRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := doc.SetRaw(".server", "{ host = \"z\"; }"); err != nil {
+	if err := doc.SetRaw(":/server", "{ host = \"z\"; }"); err != nil {
 		t.Fatalf("SetRaw server: %v", err)
 	}
 	// Editing something inside the already-replaced server span must be rejected.
-	if err := doc.SetRaw(".server.host", `"nope"`); err == nil {
+	if err := doc.SetRaw(":/server.host", `"nope"`); err == nil {
 		t.Error("expected overlap error, got nil")
 	}
 }
@@ -152,9 +153,9 @@ func TestDocumentNodeUnmarshal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	n, ok := doc.Get(".port")
+	n, ok := doc.Get(":/port")
 	if !ok {
-		t.Fatal("no .port")
+		t.Fatal("no :/port")
 	}
 	var port int
 	if err := n.Unmarshal(&port); err != nil {
@@ -164,7 +165,7 @@ func TestDocumentNodeUnmarshal(t *testing.T) {
 		t.Errorf("port = %d, want 14", port)
 	}
 
-	flags, ok := doc.Get(".server.flags")
+	flags, ok := doc.Get(":/server.flags")
 	if !ok {
 		t.Fatal("no flags")
 	}
@@ -182,12 +183,12 @@ func TestDocumentGetErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range []string{".missing", ".server.nope", ".server.flags[9]", ".server.flags[]", "name", ""} {
+	for _, p := range []string{":/missing", ":/server.nope", ":/server.flags.9", ":/server.flags.", "name", ""} {
 		if _, ok := doc.Get(p); ok {
 			t.Errorf("Get(%q) unexpectedly succeeded", p)
 		}
 	}
-	if err := doc.SetRaw(".missing", "1"); err == nil {
+	if err := doc.SetRaw(":/missing", "1"); err == nil {
 		t.Error("SetRaw on missing path should error")
 	}
 }

@@ -2,23 +2,26 @@ package setaypath
 
 import "testing"
 
-// TestPathGrammarAcceptReject locks the boompaw-generated path grammar's shape:
-// which paths it accepts and which it rejects. Decoding of the parsed steps is
-// covered end-to-end by the Document tests in the parent package.
+// TestPathGrammarAcceptReject locks the boompaw-generated setay path grammar's
+// shape: which paths it accepts and which it rejects. Decoding of the parsed
+// segments is covered end-to-end by the Document tests in the parent package.
 func TestPathGrammarAcceptReject(t *testing.T) {
 	accept := []string{
-		".name",
-		".server.host",
-		".servers[0]",
-		".ports[-1]",
-		`.["a.b"]`,
-		`."quoted key"`,
-		".a[0].b",
-		".a.b.c",
-		".with-hyphen",
-		".n123",
-		"._under",
-		`.["with \"escape\""]`,
+		":/name",
+		":/server.host",
+		":/servers.0",
+		":/ports.-1",
+		":/a.b.c",
+		":/with-hyphen",
+		":/n123",
+		":/_under",
+		":/a.-1.b",       // negative index mid-path
+		`:/"a.b"`,        // DQ quoted key (dot inside)
+		`:/'a b'`,        // SQ quoted key (space inside)
+		`:/'a${b}'`,      // SQ allows bare ${ }
+		`:/x."q y".0`,    // mixed segments
+		`:/"with \"x\""`, // DQ with an escaped quote
+		`:/'\''`,         // SQ with an escaped quote
 	}
 	for _, s := range accept {
 		if _, err := Parse(s); err != nil {
@@ -27,16 +30,20 @@ func TestPathGrammarAcceptReject(t *testing.T) {
 	}
 
 	reject := []string{
-		"",        // empty
-		".",       // identity is not a single value step
-		".[]",     // streaming iterate — belongs to setayq, not here
-		"a.b",     // must start with '.'
-		".a.",     // trailing dot with no field
-		".[",      // unterminated bracket
-		".1abc",   // field name cannot start with a digit
-		".a b",    // no whitespace inside a path
-		".a | .b", // pipes belong to setayq
-		".a[x]",   // non-numeric, non-quoted index
+		"",          // empty
+		":/",        // root only, no segment
+		"name",      // must start with ":/"
+		": /a",      // ":/" is a single token, no interior space
+		":/a.",      // trailing separator
+		":/a..b",    // empty segment
+		":/1abc",    // a segment starting with a digit is an index, "abc" is leftover
+		":/-",       // an index needs at least one digit
+		":/my-",     // bare key cannot end with a hyphen
+		":/a b",     // no whitespace inside a path
+		":/a[0]",    // brackets are not the index syntax here
+		`:/"a${b}"`, // DQ reserves $ { } (must be escaped)
+		`:/"unterm`, // unterminated quoted key
+		`:/"\z"`,    // unknown escape in a quoted key
 	}
 	for _, s := range reject {
 		if _, err := Parse(s); err == nil {

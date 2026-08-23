@@ -1,95 +1,34 @@
-# Grammar for setay value-addressing paths: the single-value subset of setayq's
-# (jq-like) filter syntax, used to navigate and edit a setay Document.
-# Examples: .name  .server.host  .servers[0]  .ports[-1]  .["a.b"]
-# Streaming/query constructs (.[] , pipes, functions, ',') are intentionally NOT
-# part of this grammar; those belong to setayq's full filter language.
+# Grammar for setay value-addressing paths. See docs/setay-path-notation.ja.md.
+# A path is ":/" (the root marker, one atomic token) followed by "."-separated
+# segments. Each segment selects a dict key or a list index:
+#   - a bare key (LenientIdentifier: [A-Za-z_] then [A-Za-z0-9_-]*, no leading or
+#     trailing hyphen),
+#   - a quoted key (a setay string, DQ or SQ, that does NOT interpolate; DQ
+#     reserves $ { }, SQ needs only ' and \ escaped), or
+#   - a numeric list index, optionally negative.
+# Examples: :/name  :/server.host  :/servers.0  :/ports.-1  :/"a.b"  :/'a${b}'
+# No brackets, no streaming, no pipes -- those belong to setayq.
 package setaypath;
 
-# A path is one or more steps. Each step selects a dict field or a list index.
 root-def SetayPath
 {
-	steps: one-or-more<SetayPathStep>;
+	_: ":/";
+	first: SetayPathSegment;
+	rest: zero-or-more<SetayPathSegmentSep>;
 };
 
-def SetayPathStep
-{
-	_: SetayPathDotField
-	   or SetayPathDotBracket
-	   or SetayPathBracket;
-};
-
-# ".name" or ".\"quoted key\""
-def SetayPathDotField
+def SetayPathSegmentSep
 {
 	_: '.';
-	name: SetayPathName;
+	segment: SetayPathSegment;
 };
 
-def SetayPathName
+def SetayPathSegment
 {
-	_: SetayPathBareName or SetayPathQuoted;
+	_: SetayPathIndex or SetayPathBareKey or SetayPathQuotedKey;
 };
 
-# Bare identifier: [A-Za-z_] then [A-Za-z0-9_-]* (matches setayq's lexIdent).
-def SetayPathBareName
-{
-	lead: SetayPathNameLead;
-	tail: zero-or-more<SetayPathNameCont>;
-};
-
-def SetayPathNameLead
-{
-	_: char-range<'a','z'> or char-range<'A','Z'> or '_';
-};
-
-def SetayPathNameCont
-{
-	_: char-range<'a','z'> or char-range<'A','Z'> or char-range<'0','9'> or '_' or '-';
-};
-
-# Double-quoted key with backslash escapes: "a.b", "with space".
-def SetayPathQuoted
-{
-	_: '"';
-	chars: zero-or-more<SetayPathQuotedChar>;
-	_: '"';
-};
-
-def SetayPathQuotedChar
-{
-	_: SetayPathEscaped or SetayPathQuotedNormal;
-};
-
-def SetayPathEscaped
-{
-	_: '\\';
-	ch: anychar;
-};
-
-def SetayPathQuotedNormal
-{
-	_: anychar-except<'"' or '\\'>;
-};
-
-# ".[...]" — a bracket step written with a leading dot (jq allows ".[0]").
-def SetayPathDotBracket
-{
-	_: '.';
-	bracket: SetayPathBracket;
-};
-
-# "[n]", "[-n]", or "[\"key\"]".
-def SetayPathBracket
-{
-	_: '[';
-	inner: SetayPathBracketInner;
-	_: ']';
-};
-
-def SetayPathBracketInner
-{
-	_: SetayPathIndex or SetayPathQuoted;
-};
+# --- Numeric list index (optionally negative) ---
 
 def SetayPathIndex
 {
@@ -105,4 +44,137 @@ def SetayPathMinus
 def SetayPathDigit
 {
 	_: char-range<'0','9'>;
+};
+
+# --- Bare key = LenientIdentifier ---
+
+def SetayPathBareKey
+{
+	firstCh: SetayPathKeyLead;
+	trailing: zero-or-one<SetayPathKeyTrailing>;
+};
+
+def SetayPathKeyTrailing
+{
+	midChars: zero-or-more<SetayPathKeyMid>;
+	lastCh: SetayPathKeyLast;
+};
+
+def SetayPathKeyLead
+{
+	_: char-range<'a','z'> or char-range<'A','Z'> or '_';
+};
+
+def SetayPathKeyMid
+{
+	_: char-range<'a','z'> or char-range<'A','Z'> or char-range<'0','9'> or '_' or '-';
+};
+
+def SetayPathKeyLast
+{
+	_: char-range<'a','z'> or char-range<'A','Z'> or char-range<'0','9'> or '_';
+};
+
+# --- Quoted key (a setay string used as a key; no interpolation) ---
+
+def SetayPathQuotedKey
+{
+	_: SetayPathDqKey or SetayPathSqKey;
+};
+
+# Double-quoted: reserves $ { } (must be escaped), like a setay DQ string but
+# without interpolation.
+def SetayPathDqKey
+{
+	_: '"';
+	content: zero-or-more<SetayPathDqContent>;
+	_: '"';
+};
+
+def SetayPathDqContent
+{
+	_: SetayPathEscape or SetayPathDqNormal;
+};
+
+def SetayPathDqNormal
+{
+	_: anychar-except<'"' or '\\' or '$' or '{' or '}'>;
+};
+
+# Single-quoted: minimal required escaping (only ' and \).
+def SetayPathSqKey
+{
+	_: '\'';
+	content: zero-or-more<SetayPathSqContent>;
+	_: '\'';
+};
+
+def SetayPathSqContent
+{
+	_: SetayPathEscape or SetayPathSqNormal;
+};
+
+def SetayPathSqNormal
+{
+	_: anychar-except<'\'' or '\\'>;
+};
+
+# --- Escape sequences (same set as setay strings) ---
+
+def SetayPathEscape
+{
+	_: '\\';
+	ch: SetayPathEscapeChar;
+};
+
+def SetayPathEscapeChar
+{
+	_: 'n' or 'r' or 't' or '0'
+	   or SetayPathHexEscape or SetayPathUnicode4 or SetayPathUnicode8
+	   or SetayPathAsciiSymbol;
+};
+
+def SetayPathAsciiSymbol
+{
+	_: char-range<'!','/'> or char-range<':','@'>
+	   or char-range<'[','`'> or char-range<'{','~'>;
+};
+
+def SetayPathHexEscape
+{
+	_: 'x';
+	_: SetayPathHex07;
+	_: SetayPathHexDigit;
+};
+
+def SetayPathHex07
+{
+	_: char-range<'0','7'>;
+};
+
+def SetayPathUnicode4
+{
+	_: 'u';
+	_: SetayPathHexDigit;
+	_: SetayPathHexDigit;
+	_: SetayPathHexDigit;
+	_: SetayPathHexDigit;
+};
+
+def SetayPathUnicode8
+{
+	_: 'U';
+	_: SetayPathHexDigit;
+	_: SetayPathHexDigit;
+	_: SetayPathHexDigit;
+	_: SetayPathHexDigit;
+	_: SetayPathHexDigit;
+	_: SetayPathHexDigit;
+	_: SetayPathHexDigit;
+	_: SetayPathHexDigit;
+};
+
+def SetayPathHexDigit
+{
+	_: char-range<'0','9'> or char-range<'a','f'> or char-range<'A','F'>;
 };
