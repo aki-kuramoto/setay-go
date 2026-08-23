@@ -182,9 +182,9 @@ func (d *Document) fieldOf(dict *DefSetayDict, key string) (*Node, bool) {
 		return nil, false
 	}
 	u := &unmarshaler{source: d.source}
-	for _, e := range dictEntries(dict) {
+	for i, e := range dictEntries(dict) {
 		if u.extractKeyText(e.Key) == key {
-			return &Node{doc: d, value: e.Value}, true
+			return &Node{doc: d, value: e.Value, parentDict: dict, entry: e, index: i}, true
 		}
 	}
 	return nil, false
@@ -196,6 +196,15 @@ func (d *Document) fieldOf(dict *DefSetayDict, key string) (*Node, bool) {
 type Node struct {
 	doc   *Document
 	value *DefSetayValue
+
+	// Location context, filled in by navigation, used for structural edits.
+	// A node obtained from a dict field has parentDict+entry+index; one from a
+	// list index has parentList+index; the root node (Document.Root) has rootDict.
+	parentDict *DefSetayDict
+	entry      *DefSetayDictEntry
+	parentList *DefSetayList
+	index      int
+	rootDict   *DefSetayDict
 }
 
 // Raw returns the value's original source text, exactly as written.
@@ -260,7 +269,7 @@ func (n *Node) Index(i int) (*Node, bool) {
 	if i < 0 || i >= len(vals) {
 		return nil, false
 	}
-	return &Node{doc: n.doc, value: vals[i]}, true
+	return &Node{doc: n.doc, value: vals[i], parentList: list, index: i}, true
 }
 
 // Unmarshal decodes this value into v (a non-nil pointer), using the same

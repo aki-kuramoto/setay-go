@@ -3,8 +3,8 @@
 > これは設計ドキュメントです。決定済みの点と未決の論点を分けて記録します。
 > 文字列/エスケープ仕様は setay.bp / unmarshal.go に、パス記法 (`:/` root・`.` 区切り・
 > 数値index・DQ/SQ 引用キー) は internal/setaypath/path.bp + document.go に**実装済み**。
-> 構造編集は「不変 Document + ChangeSet + Apply」モデルの phase 1 まで実装済み。残るは
-> phase 2 (rename/delete/insert の操作)。
+> 構造編集は「不変 Document + ChangeSet + Apply」モデルで、rename/delete/append/prepend
+> (気楽版と厳密版) まで実装済み。
 
 ## 決定: setayq とは別物にする
 
@@ -216,10 +216,22 @@ setay.bp / unmarshal.go を上の確定版に合わせた:
 
 **phase 1 実装済み**: 不変 Document / ChangeSet / `SetRaw` / `Apply` (document.go)。
 
-### 未決 (phase 2)
+### phase 2 実装済み (document_edit.go)
 
-- **構造編集の操作**: `Rename` (キー span) / `Delete` (区切り込み除去) / `Append`・
-  `Prepend`・`InsertBefore`・`InsertAfter` を ChangeSet に追加。Node に親/エントリ/位置の
-  文脈を持たせる (Field/Index で設定)。
-- **決めごと** (phase 2 着手時): 挿入テキストの整形 (兄弟のインデントに倣う案 B 推奨) と、
-  delete が消す範囲 (エントリ + 区切り + 行頭インデント + 末尾改行)。
+Node に位置文脈 (parentDict/entry/parentList/index、root は rootDict) を持たせ
+(Field/Index/`Document.Root()` で設定)、ChangeSet に構造操作を追加:
+
+- `Rename(n, keyText)`: キーの span を差し替え。
+- `Delete(n)`: エントリ/要素を「その行 (行頭インデント + 本体 + 区切り + 末尾改行)」ごと
+  除去。first/middle/last/複数行値/コメント混在でも綺麗に消える (`lineDeleteSpan`)。
+- **挿入 (気楽版)**: `AppendEntry`/`PrependEntry`/`AppendElem`/`PrependElem`。**兄弟の
+  インデントに倣い** (案 B)、`key = value;` (list は `value,`) を組み立てて挿入。末尾区切りが
+  無ければ補う。改行は文書の改行 (`\n`/`\r\n`) を踏襲。
+- **挿入 (厳密版)**: `AppendRaw`/`PrependRaw`。閉じ/開き括弧の直前/直後に**テキストを逐語**
+  挿入 (呼び手がインデント・区切り・改行を用意)。
+
+### phase 2 の残り (今後)
+
+- 空コンテナへの気楽 append (今は非対応、`AppendRaw` を使う)。
+- 任意位置への `InsertBefore`/`InsertAfter` (今は Append/Prepend のみ)。
+- 単一行コンテナへの気楽挿入/削除は best-effort (綺麗さは保証しない)。
