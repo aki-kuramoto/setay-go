@@ -656,9 +656,9 @@ func TestVarInterpolationTrailingText(t *testing.T) {
 	}
 }
 
-// TestVarInterpolationMultipleDollarSigns: string with multiple bare $ signs.
+// TestVarInterpolationMultipleDollarSigns: string with multiple escaped $ signs.
 func TestVarInterpolationMultipleDollarSigns(t *testing.T) {
-	input := `{ str-val = "$10 + $20 = $30" }`
+	input := `{ str-val = "\$10 + \$20 = \$30" }`
 	var cfg VarTypedConfig
 	if err := setay.Unmarshal([]byte(input), &cfg); err != nil {
 		t.Fatalf("Unmarshal error: %v", err)
@@ -671,7 +671,7 @@ func TestVarInterpolationMultipleDollarSigns(t *testing.T) {
 // TestVarInterpolationMixedLiteralsAndVars: "name=${VAR}, port=$literal".
 func TestVarInterpolationMixedLiteralsAndVars(t *testing.T) {
 	t.Setenv("SETAY_MIX_VAR", "Bob")
-	input := `{ str-val = "name=${SETAY_MIX_VAR}, price=$99" }`
+	input := `{ str-val = "name=${SETAY_MIX_VAR}, price=\$99" }`
 	var cfg VarTypedConfig
 	if err := setay.Unmarshal([]byte(input), &cfg); err != nil {
 		t.Fatalf("Unmarshal error: %v", err)

@@ -237,21 +237,15 @@ def SetayDqString
 
 def SetayDqStringContent
 {
-	_: SetayVarRef or SetayEscapeSequence or SetayDqDollarChar or SetayDqNormalChar;
+	_: SetayVarRef or SetayEscapeSequence or SetayDqNormalChar;
 };
 
-# Any character except '"', '\', and '$'.
-# '$' is excluded here so that '${' can be parsed as SetayVarRef.
+# Any character except '"', '\', '$', '{', '}'.
+# '$' '{' '}' are excluded so that '${' parses as SetayVarRef and so that a
+# literal '$', '{', or '}' must be written as an escape (\$ \{ \}).
 def SetayDqNormalChar
 {
-	_: anychar-except<'"' or '\\' or '$'>;
-};
-
-# A bare '$' not followed by '{': treated as a literal '$'.
-def SetayDqDollarChar
-{
-	_: '$';
-	_: not-followed-by<'{'>;
+	_: anychar-except<'"' or '\\' or '$' or '{' or '}'>;
 };
 
 # --- Single-quoted string '...' ---
@@ -286,16 +280,32 @@ def SetayEscapeSequence
 
 def SetayEscapeChar
 {
-	_: 't' or 'r' or 'n' or '0' or '\\' or '"' or '\''
-	   or SetayHexEscape or SetayUnicode4Escape or SetayUnicode8Escape;
+	_: 'n' or 'r' or 't' or '0'
+	   or SetayHexEscape or SetayUnicode4Escape or SetayUnicode8Escape
+	   or SetayAsciiSymbol;
 };
 
-# \xXX (0x00 - 0x7F)
+# Any printable ASCII symbol (punctuation): '\' + symbol yields the literal
+# symbol. Covers " ' \ $ { } and every other ASCII punctuation. Space is
+# intentionally excluded (a '\' + space is invalid).
+def SetayAsciiSymbol
+{
+	_: char-range<'!','/'> or char-range<':','@'>
+	   or char-range<'[','`'> or char-range<'{','~'>;
+};
+
+# \xXX -- the first hex digit is restricted to 0-7, limiting the value to
+# 0x00-0x7F.
 def SetayHexEscape
 {
 	_: 'x';
+	_: SetayHexDigit07;
 	_: SetayHexDigit;
-	_: SetayHexDigit;
+};
+
+def SetayHexDigit07
+{
+	_: char-range<'0','7'>;
 };
 
 # \uXXXX

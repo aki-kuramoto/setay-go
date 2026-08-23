@@ -498,9 +498,6 @@ func (u *unmarshaler) decodeStringContent(contents []*DefSetayDqStringContent) (
 			sb.WriteString(resolved)
 		case *DefSetayEscapeSequence:
 			sb.WriteString(u.decodeEscape(v))
-		case *DefSetayDqDollarChar:
-			// Bare '$' not followed by '{': emit it literally.
-			sb.WriteString("$")
 		case *DefSetayDqNormalChar:
 			sb.WriteString(u.textOf(v.GetAuthority()))
 		default:
@@ -566,7 +563,9 @@ func (u *unmarshaler) decodeEscape(esc *DefSetayEscapeSequence) string {
 			return string(rune(n))
 		}
 	}
-	return escText
+	// Any other escape is '\' + a single ASCII symbol (the grammar guarantees no
+	// unknown letter/digit escape reaches here): yield the symbol itself.
+	return escText[1:]
 }
 
 // unmarshalSet populates a map[K]struct{} from a SetaySet node.

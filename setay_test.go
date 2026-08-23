@@ -717,15 +717,20 @@ func TestVarBoolFallback(t *testing.T) {
 	}
 }
 
-// TestVarBareDollarLiteral: bare '$' not followed by '{' is literal.
-func TestVarBareDollarLiteral(t *testing.T) {
-	input := `{ greeting = "price: $100" }`
+// TestVarEscapedDollarLiteral: in a double-quoted string a literal '$' must be
+// escaped (\$); a bare '$' is reserved (only '${...}' is interpolation), so a
+// bare '$' that is not '${' is now a parse error.
+func TestVarEscapedDollarLiteral(t *testing.T) {
+	input := `{ greeting = "price: \$100" }`
 	var cfg VarConfig
 	if err := setay.Unmarshal([]byte(input), &cfg); err != nil {
 		t.Fatalf("Unmarshal error: %v", err)
 	}
 	if cfg.Greeting != "price: $100" {
 		t.Errorf("Greeting = %q, want %q", cfg.Greeting, "price: $100")
+	}
+	if err := setay.Unmarshal([]byte(`{ g = "a $ b" }`), &cfg); err == nil {
+		t.Error("bare '$' in a double-quoted string should now be a parse error")
 	}
 }
 

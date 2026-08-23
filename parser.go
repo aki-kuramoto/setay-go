@@ -460,14 +460,6 @@ type DefSetayDqNormalChar struct {
 
 func (n *DefSetayDqNormalChar) GetAuthority() *Authority { return n.Authority }
 
-// DefSetayDqDollarChar is the parse result of the SetayDqDollarChar rule.
-type DefSetayDqDollarChar struct {
-	Authority *Authority
-	AnonymousField1 StringFromSource
-}
-
-func (n *DefSetayDqDollarChar) GetAuthority() *Authority { return n.Authority }
-
 // DefSetaySqString is the parse result of the SetaySqString rule.
 type DefSetaySqString struct {
 	Authority *Authority
@@ -511,15 +503,31 @@ type DefSetayEscapeChar struct {
 
 func (n *DefSetayEscapeChar) GetAuthority() *Authority { return n.Authority }
 
+// DefSetayAsciiSymbol is the parse result of the SetayAsciiSymbol rule.
+type DefSetayAsciiSymbol struct {
+	Authority *Authority
+	AnonymousField1 ParseNode
+}
+
+func (n *DefSetayAsciiSymbol) GetAuthority() *Authority { return n.Authority }
+
 // DefSetayHexEscape is the parse result of the SetayHexEscape rule.
 type DefSetayHexEscape struct {
 	Authority *Authority
 	AnonymousField1 StringFromSource
-	AnonymousField2 *DefSetayHexDigit
+	AnonymousField2 *DefSetayHexDigit07
 	AnonymousField3 *DefSetayHexDigit
 }
 
 func (n *DefSetayHexEscape) GetAuthority() *Authority { return n.Authority }
+
+// DefSetayHexDigit07 is the parse result of the SetayHexDigit07 rule.
+type DefSetayHexDigit07 struct {
+	Authority *Authority
+	AnonymousField1 StringFromSource
+}
+
+func (n *DefSetayHexDigit07) GetAuthority() *Authority { return n.Authority }
 
 // DefSetayUnicode4Escape is the parse result of the SetayUnicode4Escape rule.
 type DefSetayUnicode4Escape struct {
@@ -2779,14 +2787,6 @@ func (p *PackratParser) parseSetayDqStringContent(pos int) (*DefSetayDqStringCon
 			}
 		}
 		if !choiceMatched {
-			node, end, err := p.parseSetayDqDollarChar(pos)
-			if err == nil {
-				result.AnonymousField1 = node
-				pos = end
-				choiceMatched = true
-			}
-		}
-		if !choiceMatched {
 			node, end, err := p.parseSetayDqNormalChar(pos)
 			if err == nil {
 				result.AnonymousField1 = node
@@ -2833,6 +2833,8 @@ func (p *PackratParser) parseSetayDqNormalChar(pos int) (*DefSetayDqNormalChar, 
 		if ch == '"' { excluded = true }
 		if ch == '\\' { excluded = true }
 		if ch == '$' { excluded = true }
+		if ch == '{' { excluded = true }
+		if ch == '}' { excluded = true }
 		if excluded {
 			err := fmt.Errorf("line %d: char %q is in excluded set", p.lineAt(pos), string(ch))
 			p.memoize("SetayDqNormalChar", startPos, nil, pos, err)
@@ -2843,59 +2845,6 @@ func (p *PackratParser) parseSetayDqNormalChar(pos int) (*DefSetayDqNormalChar, 
 	}
 	result.Authority = p.makeAuthority(startPos, pos)
 	p.memoize("SetayDqNormalChar", startPos, result, pos, nil)
-	return result, pos, nil
-}
-
-func (p *PackratParser) parseSetayDqDollarChar(pos int) (*DefSetayDqDollarChar, int, error) {
-	if m, ok := p.getMemo("SetayDqDollarChar", pos); ok {
-		if m.err != nil {
-			return nil, m.end, m.err
-		}
-		return m.node.(*DefSetayDqDollarChar), m.end, nil
-	}
-
-	if err := p.enterRule(); err != nil {
-		return nil, pos, err
-	}
-	defer p.leaveRule()
-
-	startPos := pos
-	result := &DefSetayDqDollarChar{}
-
-	// Field: AnonymousField1 (Literal "$")
-	{
-		expected := []rune("$")
-		if pos+len(expected) > len(p.input) {
-			err := fmt.Errorf("line %d: expected %q, got EOF", p.lineAt(pos), "$")
-			p.memoize("SetayDqDollarChar", startPos, nil, pos, err)
-			return nil, pos, err
-		}
-		matched := true
-		for i, r := range expected {
-			if p.input[pos+i] != r { matched = false; break }
-		}
-		if !matched {
-			err := fmt.Errorf("line %d: expected %q", p.lineAt(pos), "$")
-			p.memoize("SetayDqDollarChar", startPos, nil, pos, err)
-			return nil, pos, err
-		}
-		result.AnonymousField1 = p.makeStringFromSource(pos, pos+len(expected))
-		pos += len(expected)
-	}
-	// Field: AnonymousField2 (NotFollowedBy)
-	{
-		if pos < len(p.input) {
-			ch := p.input[pos]
-			if ch == '{' {
-				err := fmt.Errorf("line %d: notFollowedBy matched (got %q)", p.lineAt(pos), string(ch))
-				p.memoize("SetayDqDollarChar", startPos, nil, pos, err)
-				return nil, pos, err
-			}
-		}
-		// notFollowedBy succeeded: pos unchanged
-	}
-	result.Authority = p.makeAuthority(startPos, pos)
-	p.memoize("SetayDqDollarChar", startPos, result, pos, nil)
 	return result, pos, nil
 }
 
@@ -3142,7 +3091,7 @@ func (p *PackratParser) parseSetayEscapeChar(pos int) (*DefSetayEscapeChar, int,
 	{
 		var choiceMatched bool
 		if !choiceMatched {
-			expected := []rune("t")
+			expected := []rune("n")
 			if pos+len(expected) <= len(p.input) {
 				ok := true
 				for i, r := range expected {
@@ -3170,7 +3119,7 @@ func (p *PackratParser) parseSetayEscapeChar(pos int) (*DefSetayEscapeChar, int,
 			}
 		}
 		if !choiceMatched {
-			expected := []rune("n")
+			expected := []rune("t")
 			if pos+len(expected) <= len(p.input) {
 				ok := true
 				for i, r := range expected {
@@ -3185,48 +3134,6 @@ func (p *PackratParser) parseSetayEscapeChar(pos int) (*DefSetayEscapeChar, int,
 		}
 		if !choiceMatched {
 			expected := []rune("0")
-			if pos+len(expected) <= len(p.input) {
-				ok := true
-				for i, r := range expected {
-					if p.input[pos+i] != r { ok = false; break }
-				}
-				if ok {
-					result.AnonymousField1 = p.makeStringFromSource(pos, pos+len(expected))
-					pos += len(expected)
-					choiceMatched = true
-				}
-			}
-		}
-		if !choiceMatched {
-			expected := []rune("\\")
-			if pos+len(expected) <= len(p.input) {
-				ok := true
-				for i, r := range expected {
-					if p.input[pos+i] != r { ok = false; break }
-				}
-				if ok {
-					result.AnonymousField1 = p.makeStringFromSource(pos, pos+len(expected))
-					pos += len(expected)
-					choiceMatched = true
-				}
-			}
-		}
-		if !choiceMatched {
-			expected := []rune("\"")
-			if pos+len(expected) <= len(p.input) {
-				ok := true
-				for i, r := range expected {
-					if p.input[pos+i] != r { ok = false; break }
-				}
-				if ok {
-					result.AnonymousField1 = p.makeStringFromSource(pos, pos+len(expected))
-					pos += len(expected)
-					choiceMatched = true
-				}
-			}
-		}
-		if !choiceMatched {
-			expected := []rune("'")
 			if pos+len(expected) <= len(p.input) {
 				ok := true
 				for i, r := range expected {
@@ -3264,6 +3171,14 @@ func (p *PackratParser) parseSetayEscapeChar(pos int) (*DefSetayEscapeChar, int,
 			}
 		}
 		if !choiceMatched {
+			node, end, err := p.parseSetayAsciiSymbol(pos)
+			if err == nil {
+				result.AnonymousField1 = node
+				pos = end
+				choiceMatched = true
+			}
+		}
+		if !choiceMatched {
 			err := fmt.Errorf("line %d: no choice matched for field AnonymousField1", p.lineAt(pos))
 			p.memoize("SetayEscapeChar", startPos, nil, pos, err)
 			return nil, pos, err
@@ -3271,6 +3186,64 @@ func (p *PackratParser) parseSetayEscapeChar(pos int) (*DefSetayEscapeChar, int,
 	}
 	result.Authority = p.makeAuthority(startPos, pos)
 	p.memoize("SetayEscapeChar", startPos, result, pos, nil)
+	return result, pos, nil
+}
+
+func (p *PackratParser) parseSetayAsciiSymbol(pos int) (*DefSetayAsciiSymbol, int, error) {
+	if m, ok := p.getMemo("SetayAsciiSymbol", pos); ok {
+		if m.err != nil {
+			return nil, m.end, m.err
+		}
+		return m.node.(*DefSetayAsciiSymbol), m.end, nil
+	}
+
+	if err := p.enterRule(); err != nil {
+		return nil, pos, err
+	}
+	defer p.leaveRule()
+
+	startPos := pos
+	result := &DefSetayAsciiSymbol{}
+
+	// Field: AnonymousField1 (Choice)
+	{
+		var choiceMatched bool
+		if !choiceMatched {
+			if pos < len(p.input) && p.input[pos] >= '!' && p.input[pos] <= '/' {
+				result.AnonymousField1 = p.makeStringFromSource(pos, pos+1)
+				pos++
+				choiceMatched = true
+			}
+		}
+		if !choiceMatched {
+			if pos < len(p.input) && p.input[pos] >= ':' && p.input[pos] <= '@' {
+				result.AnonymousField1 = p.makeStringFromSource(pos, pos+1)
+				pos++
+				choiceMatched = true
+			}
+		}
+		if !choiceMatched {
+			if pos < len(p.input) && p.input[pos] >= '[' && p.input[pos] <= '`' {
+				result.AnonymousField1 = p.makeStringFromSource(pos, pos+1)
+				pos++
+				choiceMatched = true
+			}
+		}
+		if !choiceMatched {
+			if pos < len(p.input) && p.input[pos] >= '{' && p.input[pos] <= '~' {
+				result.AnonymousField1 = p.makeStringFromSource(pos, pos+1)
+				pos++
+				choiceMatched = true
+			}
+		}
+		if !choiceMatched {
+			err := fmt.Errorf("line %d: no choice matched for field AnonymousField1", p.lineAt(pos))
+			p.memoize("SetayAsciiSymbol", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+	}
+	result.Authority = p.makeAuthority(startPos, pos)
+	p.memoize("SetayAsciiSymbol", startPos, result, pos, nil)
 	return result, pos, nil
 }
 
@@ -3310,9 +3283,9 @@ func (p *PackratParser) parseSetayHexEscape(pos int) (*DefSetayHexEscape, int, e
 		result.AnonymousField1 = p.makeStringFromSource(pos, pos+len(expected))
 		pos += len(expected)
 	}
-	// Field: AnonymousField2 (Reference -> SetayHexDigit)
+	// Field: AnonymousField2 (Reference -> SetayHexDigit07)
 	{
-		node, end, err := p.parseSetayHexDigit(pos)
+		node, end, err := p.parseSetayHexDigit07(pos)
 		if err != nil {
 			p.memoize("SetayHexEscape", startPos, nil, pos, err)
 			return nil, pos, err
@@ -3332,6 +3305,43 @@ func (p *PackratParser) parseSetayHexEscape(pos int) (*DefSetayHexEscape, int, e
 	}
 	result.Authority = p.makeAuthority(startPos, pos)
 	p.memoize("SetayHexEscape", startPos, result, pos, nil)
+	return result, pos, nil
+}
+
+func (p *PackratParser) parseSetayHexDigit07(pos int) (*DefSetayHexDigit07, int, error) {
+	if m, ok := p.getMemo("SetayHexDigit07", pos); ok {
+		if m.err != nil {
+			return nil, m.end, m.err
+		}
+		return m.node.(*DefSetayHexDigit07), m.end, nil
+	}
+
+	if err := p.enterRule(); err != nil {
+		return nil, pos, err
+	}
+	defer p.leaveRule()
+
+	startPos := pos
+	result := &DefSetayHexDigit07{}
+
+	// Field: AnonymousField1 (CharRange)
+	{
+		if pos >= len(p.input) {
+			err := fmt.Errorf("line %d: expected char in range '0'..'7', got EOF", p.lineAt(pos))
+			p.memoize("SetayHexDigit07", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+		ch := p.input[pos]
+		if ch < '0' || ch > '7' {
+			err := fmt.Errorf("line %d: char %q not in range '0'..'7'", p.lineAt(pos), string(ch))
+			p.memoize("SetayHexDigit07", startPos, nil, pos, err)
+			return nil, pos, err
+		}
+		result.AnonymousField1 = p.makeStringFromSource(pos, pos+1)
+		pos++
+	}
+	result.Authority = p.makeAuthority(startPos, pos)
+	p.memoize("SetayHexDigit07", startPos, result, pos, nil)
 	return result, pos, nil
 }
 
