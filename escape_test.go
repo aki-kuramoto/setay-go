@@ -48,9 +48,10 @@ func TestEscapeValidDQ(t *testing.T) {
 	}
 }
 
-// Single-quoted strings use "minimal escaping": only ' (the delimiter) and \
-// must be escaped. $ { } -- and " and every other symbol -- are written bare,
-// and SQ does not interpolate. It is NOT raw: the full escape table still works.
+// Single-quoted strings use "minimal REQUIRED escaping": the same escape table
+// as DQ is available, but only ' (the delimiter) and \ MUST be escaped. $ { } --
+// and " and every other symbol -- are written bare, and SQ does not interpolate.
+// It is NOT raw, and not "fewer escapes" -- just fewer mandatory ones.
 func TestEscapeSQ(t *testing.T) {
 	valid := map[string]string{
 		`{ s = '${VAR} $100 {a} b}' }`: "${VAR} $100 {a} b}", // $ { } bare, no interpolation
