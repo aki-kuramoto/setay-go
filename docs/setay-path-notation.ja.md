@@ -3,7 +3,8 @@
 > これは設計ドキュメントです。決定済みの点と未決の論点を分けて記録します。
 > 文字列/エスケープ仕様は setay.bp / unmarshal.go に、パス記法 (`:/` root・`.` 区切り・
 > 数値index・DQ/SQ 引用キー) は internal/setaypath/path.bp + document.go に**実装済み**。
-> 残るのは構造編集の操作 API (別トラック)。
+> 構造編集は「不変 Document + ChangeSet + Apply」モデルの phase 1 まで実装済み。残るは
+> phase 2 (rename/delete/insert の操作)。
 
 ## 決定: setayq とは別物にする
 
@@ -199,7 +200,26 @@ setay.bp / unmarshal.go を上の確定版に合わせた:
 - 未知の英字/数字エスケープはエラーのまま。
 - 本体と `cmd/setay` の両パーサ再生成済み。回帰テスト `escape_test.go` 追加。
 
-## 未決の論点 (一つずつ決める)
+## 構造編集の API モデル (決定・phase 1 実装済み)
 
-- **構造編集操作の API 形**。これはパス記法ではなく、指したノードに当てる**操作側**の
-  設計 (value 取得 / rename / delete / append / prepend など)。別トラック。
+**不変 Document + 可変 ChangeSet + Apply で新 Document** モデルを採用:
+
+- `Document` は完全に不変 (edits を持たない)。`String()` は常に原文。読み取り
+  (`Get`/`Field`/`Node`) は pure。
+- `Document.Changes()` で `ChangeSet` (可変) を得て編集を貯める。操作は Node を受け取り
+  span 差し替えを記録 (`cs.SetRaw(n, text)` 等)。
+- `cs.Apply() (*Document, error)` が原文に適用したテキストを**再パースして新 Document**
+  を返す。原 Document は不変のまま。再パースなので新 Document の Node は fresh。適用後
+  テキストが不正なら Apply がエラー (旧 `Validate` は不要に)。
+- これで「保持中 Node の無効化」問題が消える (Document は書き換わらない)。overlap 検出は
+  ChangeSet 内で有効 (削除領域の中を編集 → エラー)。
+
+**phase 1 実装済み**: 不変 Document / ChangeSet / `SetRaw` / `Apply` (document.go)。
+
+### 未決 (phase 2)
+
+- **構造編集の操作**: `Rename` (キー span) / `Delete` (区切り込み除去) / `Append`・
+  `Prepend`・`InsertBefore`・`InsertAfter` を ChangeSet に追加。Node に親/エントリ/位置の
+  文脈を持たせる (Field/Index で設定)。
+- **決めごと** (phase 2 着手時): 挿入テキストの整形 (兄弟のインデントに倣う案 B 推奨) と、
+  delete が消す範囲 (エントリ + 区切り + 行頭インデント + 末尾改行)。

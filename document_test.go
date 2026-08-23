@@ -73,45 +73,61 @@ func TestDocumentGetRaw(t *testing.T) {
 }
 
 // Editing one value must change only that value's span; everything else stays
-// byte-identical. The oracle is a single targeted string replacement.
-func TestDocumentSetRawSingle(t *testing.T) {
+// byte-identical. Apply yields a new Document; the original is untouched.
+func TestChangeSetSetRawSingle(t *testing.T) {
 	doc, err := setay.ParseDocument(editSample)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := doc.SetRaw(":/port", "0x10"); err != nil {
+	cs := doc.Changes()
+	n, ok := doc.Get(":/port")
+	if !ok {
+		t.Fatal("no :/port")
+	}
+	if err := cs.SetRaw(n, "0x10"); err != nil {
 		t.Fatalf("SetRaw: %v", err)
 	}
+	newDoc, err := cs.Apply()
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if doc.String() != editSample {
+		t.Error("the original Document was mutated by Apply")
+	}
 	want := strings.Replace(editSample, "0xE", "0x10", 1)
-	if got := doc.String(); got != want {
+	if got := newDoc.String(); got != want {
 		t.Errorf("after edit\n--- got  ---\n%q\n--- want ---\n%q", got, want)
 	}
 }
 
-func TestDocumentSetRawNestedAndList(t *testing.T) {
+func TestChangeSetNestedAndList(t *testing.T) {
 	doc, err := setay.ParseDocument(editSample)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := doc.SetRaw(":/server.host", `"127.0.0.1"`); err != nil {
+	host, _ := doc.Get(":/server.host")
+	flag, _ := doc.Get(":/server.flags.1")
+	cs := doc.Changes()
+	if err := cs.SetRaw(host, `"127.0.0.1"`); err != nil {
 		t.Fatalf("SetRaw host: %v", err)
 	}
-	if err := doc.SetRaw(":/server.flags.1", `"Y"`); err != nil {
+	if err := cs.SetRaw(flag, `"Y"`); err != nil {
 		t.Fatalf("SetRaw flag: %v", err)
+	}
+	// Apply re-parses, so it also validates the result.
+	newDoc, err := cs.Apply()
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
 	}
 	want := editSample
 	want = strings.Replace(want, `"localhost"`, `"127.0.0.1"`, 1)
 	want = strings.Replace(want, `"y"`, `"Y"`, 1)
-	if got := doc.String(); got != want {
+	if got := newDoc.String(); got != want {
 		t.Errorf("after edits\n--- got  ---\n%q\n--- want ---\n%q", got, want)
-	}
-	// The edited document must still parse.
-	if err := doc.Validate(); err != nil {
-		t.Errorf("Validate after edits: %v", err)
 	}
 }
 
-// The low-level Node API reaches the same value and edits it in place.
+// The low-level Node API reaches the same value; the ChangeSet edits it.
 func TestDocumentNodeLowLevel(t *testing.T) {
 	doc, err := setay.ParseDocument(editSample)
 	if err != nil {
@@ -125,26 +141,57 @@ func TestDocumentNodeLowLevel(t *testing.T) {
 	if !ok {
 		t.Fatal("server.Field(host) not found")
 	}
-	if err := host.SetRaw(`"h2"`); err != nil {
+	cs := doc.Changes()
+	if err := cs.SetRaw(host, `"h2"`); err != nil {
 		t.Fatalf("SetRaw: %v", err)
 	}
+	newDoc, err := cs.Apply()
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
 	want := strings.Replace(editSample, `"localhost"`, `"h2"`, 1)
-	if got := doc.String(); got != want {
+	if got := newDoc.String(); got != want {
 		t.Errorf("got %q want %q", got, want)
 	}
 }
 
-func TestDocumentOverlapRejected(t *testing.T) {
+func TestChangeSetOverlapRejected(t *testing.T) {
 	doc, err := setay.ParseDocument(editSample)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := doc.SetRaw(":/server", "{ host = \"z\"; }"); err != nil {
+	cs := doc.Changes()
+	server, _ := doc.Get(":/server")
+	if err := cs.SetRaw(server, "{ host = \"z\"; }"); err != nil {
 		t.Fatalf("SetRaw server: %v", err)
 	}
-	// Editing something inside the already-replaced server span must be rejected.
-	if err := doc.SetRaw(":/server.host", `"nope"`); err == nil {
+	// Editing something inside the already-replaced server span must be rejected
+	// within the same ChangeSet.
+	host, _ := doc.Get(":/server.host")
+	if err := cs.SetRaw(host, `"nope"`); err == nil {
 		t.Error("expected overlap error, got nil")
+	}
+}
+
+// A node from a different document is rejected, and an edit that produces
+// invalid setay is reported by Apply (which re-parses).
+func TestChangeSetGuards(t *testing.T) {
+	doc, _ := setay.ParseDocument(editSample)
+	other, _ := setay.ParseDocument("{ a = 1; }")
+
+	cs := doc.Changes()
+	foreign, _ := other.Get(":/a")
+	if err := cs.SetRaw(foreign, "2"); err == nil {
+		t.Error("SetRaw with a node from another document should error")
+	}
+
+	cs2 := doc.Changes()
+	n, _ := doc.Get(":/port")
+	if err := cs2.SetRaw(n, "] not valid"); err != nil {
+		t.Fatalf("SetRaw records verbatim: %v", err)
+	}
+	if _, err := cs2.Apply(); err == nil {
+		t.Error("Apply should report the invalid spliced text as a parse error")
 	}
 }
 
@@ -187,8 +234,5 @@ func TestDocumentGetErrors(t *testing.T) {
 		if _, ok := doc.Get(p); ok {
 			t.Errorf("Get(%q) unexpectedly succeeded", p)
 		}
-	}
-	if err := doc.SetRaw(":/missing", "1"); err == nil {
-		t.Error("SetRaw on missing path should error")
 	}
 }

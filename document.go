@@ -20,11 +20,13 @@ import (
 // of JSON/TOML and do not preserve formatting. Use a Document when the point is
 // to load a file, change a specific part, and save it with the rest intact.
 //
-// A Document is not safe for concurrent use while edits are being recorded.
+// A Document is immutable: reads (Get, Field, and the Node accessors) never
+// change it, and String always returns the original source. To edit, collect a
+// ChangeSet from d.Changes(), record changes on it, and Apply it -- that yields
+// a new Document while this one stays unchanged.
 type Document struct {
 	source []rune
 	root   *DefSetayDocument
-	edits  []edit
 }
 
 // edit is a pending replacement of the rune span [start, start+length) in source.
@@ -43,60 +45,15 @@ func ParseDocument(src string) (*Document, error) {
 	return &Document{source: []rune(src), root: root}, nil
 }
 
-// String returns the document's current text: the original source with any
-// pending edits applied. With no edits it is byte-identical to the parsed input.
+// String returns the document's text -- always the original source, byte for
+// byte, since a Document is immutable.
 func (d *Document) String() string {
-	if len(d.edits) == 0 {
-		return string(d.source)
-	}
-	return string(d.render())
+	return string(d.source)
 }
 
 // Bytes is String as a byte slice.
 func (d *Document) Bytes() []byte {
-	return []byte(d.String())
-}
-
-// Validate re-parses the document's current text and returns any parse error.
-// SetRaw does not check that the spliced-in text is valid setay; call Validate
-// after raw edits when that guarantee is wanted.
-func (d *Document) Validate() error {
-	_, err := Parse(d.String())
-	return err
-}
-
-// render applies all pending edits to a copy of the source. Edits are applied
-// from the rightmost span to the leftmost, so earlier rune offsets stay valid
-// as the text length changes.
-func (d *Document) render() []rune {
-	es := make([]edit, len(d.edits))
-	copy(es, d.edits)
-	sort.SliceStable(es, func(i, j int) bool { return es[i].start > es[j].start })
-
-	out := append([]rune(nil), d.source...)
-	for _, e := range es {
-		repl := []rune(e.replacement)
-		next := make([]rune, 0, len(out)-e.length+len(repl))
-		next = append(next, out[:e.start]...)
-		next = append(next, repl...)
-		next = append(next, out[e.start+e.length:]...)
-		out = next
-	}
-	return out
-}
-
-// addEdit records a replacement of the given rune span, rejecting a span that
-// overlaps one already recorded (an overlap would make the result ambiguous).
-func (d *Document) addEdit(start, length int, replacement string) error {
-	newEnd := start + length
-	for _, e := range d.edits {
-		if start < e.start+e.length && e.start < newEnd {
-			return fmt.Errorf("setay: edit at [%d,%d) overlaps an existing edit at [%d,%d)",
-				start, newEnd, e.start, e.start+e.length)
-		}
-	}
-	d.edits = append(d.edits, edit{start: start, length: length, replacement: replacement})
-	return nil
+	return []byte(string(d.source))
 }
 
 // Field returns the value of a top-level dict key. The document root is always
@@ -140,15 +97,84 @@ func (d *Document) Get(path string) (*Node, bool) {
 	return n, ok
 }
 
-// SetRaw replaces the value at path with raw setay text, leaving the rest of the
-// document byte-identical. The text is spliced in verbatim and is not checked
-// for validity (see Validate). Returns an error if the path does not resolve.
-func (d *Document) SetRaw(path, setayText string) error {
-	n, ok := d.Get(path)
-	if !ok {
-		return fmt.Errorf("setay: no value at path %q", path)
+// Changes returns a new, empty ChangeSet bound to this document. Record edits on
+// it and call Apply to get a new Document; this document is left unchanged.
+func (d *Document) Changes() *ChangeSet {
+	return &ChangeSet{doc: d}
+}
+
+// ChangeSet accumulates edits against one immutable Document; Apply turns them
+// into a new Document. Operations take Nodes obtained from the same document.
+// A ChangeSet is not safe for concurrent use.
+type ChangeSet struct {
+	doc   *Document
+	edits []edit
+}
+
+// Len reports how many changes have been recorded.
+func (cs *ChangeSet) Len() int { return len(cs.edits) }
+
+// SetRaw records replacing the value at n with raw setay text. n must have come
+// from this ChangeSet's document. The text is spliced in verbatim; its validity
+// is checked when Apply re-parses. Overlapping changes are rejected.
+func (cs *ChangeSet) SetRaw(n *Node, setayText string) error {
+	if err := cs.checkNode(n); err != nil {
+		return err
 	}
-	return n.SetRaw(setayText)
+	start, length := n.Span()
+	return cs.addEdit(start, length, setayText)
+}
+
+func (cs *ChangeSet) checkNode(n *Node) error {
+	if n == nil || n.doc != cs.doc {
+		return fmt.Errorf("setay: node does not belong to this ChangeSet's document")
+	}
+	return nil
+}
+
+// addEdit records a replacement of the given rune span, rejecting a span that
+// overlaps one already recorded (an overlap would make the result ambiguous).
+func (cs *ChangeSet) addEdit(start, length int, replacement string) error {
+	newEnd := start + length
+	for _, e := range cs.edits {
+		if start < e.start+e.length && e.start < newEnd {
+			return fmt.Errorf("setay: change at [%d,%d) overlaps an existing change at [%d,%d)",
+				start, newEnd, e.start, e.start+e.length)
+		}
+	}
+	cs.edits = append(cs.edits, edit{start: start, length: length, replacement: replacement})
+	return nil
+}
+
+// render applies the recorded changes to a copy of the source, from the
+// rightmost span to the leftmost so earlier rune offsets stay valid as the text
+// length changes.
+func (cs *ChangeSet) render() []rune {
+	es := make([]edit, len(cs.edits))
+	copy(es, cs.edits)
+	sort.SliceStable(es, func(i, j int) bool { return es[i].start > es[j].start })
+
+	out := append([]rune(nil), cs.doc.source...)
+	for _, e := range es {
+		repl := []rune(e.replacement)
+		next := make([]rune, 0, len(out)-e.length+len(repl))
+		next = append(next, out[:e.start]...)
+		next = append(next, repl...)
+		next = append(next, out[e.start+e.length:]...)
+		out = next
+	}
+	return out
+}
+
+// Apply produces a new Document with the changes applied. The receiver's
+// document is unchanged. The result is re-parsed, so an edit that produced
+// invalid setay is reported here as a parse error and the new Document's nodes
+// are fresh. With no changes it returns the original (immutable) document.
+func (cs *ChangeSet) Apply() (*Document, error) {
+	if len(cs.edits) == 0 {
+		return cs.doc, nil
+	}
+	return ParseDocument(string(cs.render()))
 }
 
 func (d *Document) fieldOf(dict *DefSetayDict, key string) (*Node, bool) {
@@ -164,9 +190,9 @@ func (d *Document) fieldOf(dict *DefSetayDict, key string) (*Node, bool) {
 	return nil, false
 }
 
-// Node is a handle to a value inside a Document. It exposes the value's original
-// text and position, lets you navigate into dicts and lists, and lets you
-// replace the value in place.
+// Node is a read-only handle to a value inside a Document. It exposes the
+// value's original text and position and lets you navigate into dicts and lists.
+// To edit the value a Node points at, pass it to a ChangeSet (see Document.Changes).
 type Node struct {
 	doc   *Document
 	value *DefSetayValue
@@ -237,14 +263,6 @@ func (n *Node) Index(i int) (*Node, bool) {
 	return &Node{doc: n.doc, value: vals[i]}, true
 }
 
-// SetRaw replaces this value with raw setay text, leaving the rest of the
-// document byte-identical. The text is spliced in verbatim and is not checked
-// for validity (see Document.Validate).
-func (n *Node) SetRaw(setayText string) error {
-	start, length := n.Span()
-	return n.doc.addEdit(start, length, setayText)
-}
-
 // Unmarshal decodes this value into v (a non-nil pointer), using the same
 // mapping as the package-level Unmarshal. Useful for reading a typed value out
 // of a document without giving up the round-trip fidelity of the whole.
@@ -286,7 +304,7 @@ func listValues(list *DefSetayList) []*DefSetayValue {
 	return collectValues(list.Elements[0])
 }
 
-// pathStep is one hop of a Get/SetRaw path: a dict field or a list index.
+// pathStep is one hop of a resolved path: a dict field or a list index.
 type pathStep struct {
 	isField bool
 	field   string
