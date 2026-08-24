@@ -242,7 +242,7 @@ At unmarshal time, `${VAR_NAME}` is replaced with the value of the named variabl
   > **Note:** A bare word after `?:` (e.g. `${VAR ?: fallback}`) is treated as a **variable name**,
   > not a string literal. Use quotes to specify a literal: `${VAR ?: "fallback"}` or `${VAR ?: 'fallback'}`.
 - String interpolation works **only** inside double-quoted strings (`"..."`); single-quoted strings (`'...'`) are always literal
-- A bare `$` not followed by `{` is treated as a literal `$` character
+- Inside a double-quoted string, `$`, `{`, `}` are reserved (for interpolation) and must be escaped as `\$`, `\{`, `\}` to appear literally — a bare `$` is a parse error. In a single-quoted string they are written bare (e.g. `'price: $100'`). See the [format spec](docs/setay-format-spec.md) for the full escape table.
 - Variable references are an **unmarshal-only** feature; `Marshal` always outputs concrete values
 
 ### Resolution Priority
@@ -611,7 +611,7 @@ setay.Unmarshal([]byte(input), &o)
   > **注意:** `?:` 直後のクォートなし識別子（例: `${VAR ?: fallback}`）は**変数名**として扱われます。
   > 文字列リテラルとして使う場合はクォートが必要：`${VAR ?: "fallback"}` または `${VAR ?: 'fallback'}`。
 - 文字列補間は **ダブルクォート文字列**（`"..."`）内でのみ機能。シングルクォート文字列（`'...'`）は常にリテラル
-- `${` が続かない裸の `$` は文字リテラルとして扱われる
+- ダブルクォート文字列内では `$` `{` `}` は (補間用に) 予約されており、リテラルにするには `\$` `\{` `\}` と書く -- 素の `$` はパースエラー。シングルクォート文字列では素で書ける (例: `'price: $100'`)。完全なエスケープ表は [format spec](docs/setay-format-spec.md) を参照
 - 変数参照は **アンマーシャル専用** の機能。`Marshal` は常に具体的な値を出力する
 
 ### 解決の優先順位

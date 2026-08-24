@@ -64,10 +64,14 @@ Numeric types include both integers and floating-point numbers.
 `{ "name" = "set-ay"; }`
 
 Strings are enclosed in either double quotes `"..."` or single quotes `'...'`.
+The two forms share the same escape set (Section 9); they differ only in which
+characters must be escaped and in whether `${...}` interpolates.
 
-- Inside double quotes, single quotes can be used without escaping.
-- Inside single quotes, double quotes can be used without escaping.
-- In either case, to include the enclosing quote character itself, it must be escaped (`\"` or `\'`).
+- **Double-quoted (`"..."`)** interpolates `${...}` (see Section 5), and so
+  reserves `$`, `{`, `}` — write them as `\$`, `\{`, `\}` to appear literally. A
+  literal `"` is `\"`; a `'` may be written bare.
+- **Single-quoted (`'...'`)** is always literal (no interpolation). A literal `'`
+  is `\'`; `"`, `$`, `{`, `}` may all be written bare.
 
 ## UTC Timestamp Type
 
@@ -231,7 +235,7 @@ message = "Hello, ${NAME ?: 'stranger'}! Port is ${PORT ?: 8080}.";
 Rules:
 - String interpolation works **only** inside double-quoted strings (`"..."`)
 - Single-quoted strings (`'...'`) are always literal — `${VAR}` inside them is not expanded
-- A `$` not followed by `{` is treated as a literal `$` character (e.g. `"price: $100"`)
+- Inside a double-quoted string, `$`, `{`, and `}` are reserved and must be escaped as `\$`, `\{`, `\}` to appear literally (e.g. `"price: \$100"`). A bare `$` is a parse error, not a literal. (Single-quoted strings have no such restriction: `'price: $100'` is fine.)
 - Inside an interpolation expression (`${...}`), a bare word after `?:` is a **variable name**.
   To use a literal string as fallback, it must be quoted: `${VAR ?: "text"}` or `${VAR ?: 'text'}`.
 
@@ -380,30 +384,53 @@ A `map[K]struct{}` **cannot** appear as the top-level document (the top level mu
 
 # 9. String Escape Sequences
 
-- `\` is used as the escape character.
-- To represent `\` itself, use `\\`.
+`\` is the escape character. There are two kinds of escape:
 
-## `\xXX` Form
+- **`\` + a printable ASCII symbol → that symbol, literally.** Every ASCII
+  punctuation character has this form (e.g. `\!` → `!`, `\,` → `,`, `\$` → `$`).
+  A literal backslash is `\\`. There is no space escape: `\ ` (backslash + space)
+  is invalid — write the space bare.
+- **`\` + a letter or digit → only the defined meanings below.** Any other
+  letter/digit escape is reserved and is a parse error (e.g. `\z`, `\9`).
 
-- The value range is 0 to 127 (i.e., `\x00` to `\x7F`).
+| Escape | Meaning |
+| --- | --- |
+| `\n` | line feed (U+000A) |
+| `\r` | carriage return (U+000D) |
+| `\t` | horizontal tab (U+0009) |
+| `\0` | NUL (U+0000) |
+| `\xHH` | one byte, exactly 2 hex digits, range `\x00`–`\x7F` (the grammar requires the first digit to be `0`–`7`) |
+| `\uXXXX` | Unicode code point, exactly 4 hex digits (BMP) |
+| `\UXXXXXXXX` | Unicode code point, exactly 8 hex digits |
 
-## `\uXXXX` Form
+> Surrogate code points (`\uD800`–`\uDFFF`) are not valid on their own; use `\U`
+> for code points beyond the BMP.
 
-- `\uD800` through `\uDFFF` must not appear (surrogate range).
+## Double-quoted vs single-quoted
 
-## `\UXXXXXXXX` Form
+The escape table above is **identical** for both quote styles. They differ only
+in which characters *must* be escaped, and in whether `${...}` interpolates:
 
-- The first two digits are expected to be `00`.
+| | Double-quoted `"..."` | Single-quoted `'...'` |
+| --- | --- | --- |
+| `${...}` interpolation | yes (see Section 5) | no — always literal |
+| `"` | must escape (`\"`) | bare OK |
+| `'` | bare OK | must escape (`\'`) |
+| `$` `{` `}` | must escape — reserved for interpolation | bare OK |
+| `\` | must escape (`\\`) | must escape (`\\`) |
+| any other ASCII symbol | bare OK (escaped form also valid) | bare OK (escaped form also valid) |
 
-## Individual Escape Characters
+Single-quoted strings use **minimal required escaping**: the same escapes are
+available as in double-quoted strings, but only `'` and `\` are mandatory. Since
+they do not interpolate, `$`, `{`, `}`, and `"` are all written bare. This is not
+a "raw" string — escapes still work; there are simply fewer that are required.
 
-- `\t` — horizontal tab
-- `\r` — carriage return
-- `\n` — line feed
-- `\\` — backslash (repeated for emphasis)
-- `\0` — NUL character
-- `\"` — double quote (within double-quoted strings)
-- `\'` — single quote (within single-quoted strings)
+## Stability guarantee
+
+The meaning of an escaped ASCII symbol (`\<symbol>` = that symbol) is guaranteed
+not to change. A *bare* ASCII symbol, on the other hand, may gain a special
+meaning in a future version (a breaking change). If in doubt, escape the symbol
+and its literal meaning is preserved.
 
 ---
 
@@ -478,10 +505,14 @@ setay では複数の種類の値と値型を利用可能です。
 `{ "name" = "set-ay"; }`
 
 文字列はダブルクォート `"..."` またはシングルクォート `'...'` のいずれかで囲みます。
+両者はエスケープの集合 (9 章) を共有し、違うのは「どの文字を必ずエスケープするか」と
+「`${...}` を補間するか」だけです。
 
-- ダブルクォートで囲んだ場合、内部にシングルクォートをエスケープなしで記述可能
-- シングルクォートで囲んだ場合、内部にダブルクォートをエスケープなしで記述可能
-- いずれの場合も、囲みに使ったクォート自身を内部で使いたい場合はエスケープが必要 (`\"` または `\'`)
+- **ダブルクォート (`"..."`)** は `${...}` を補間します (5 章参照)。そのため `$` `{` `}`
+  を予約しており、リテラルにするには `\$` `\{` `\}` と書きます。`"` は `\"`、`'` は素で
+  書けます。
+- **シングルクォート (`'...'`)** は常にリテラルです (補間しない)。`'` は `\'`、`"` `$`
+  `{` `}` は全て素で書けます。
 
 
 ## UTC タイムスタンプ型
@@ -617,7 +648,7 @@ message = "Hello, ${NAME ?: 'stranger'}! Port is ${PORT ?: 8080}.";
 ルール：
 - 文字列補間は **ダブルクォート文字列**（`"..."`）内でのみ機能する
 - シングルクォート文字列（`'...'`）は常にリテラル — `${VAR}` は展開されない
-- `${` が続かない `$` は文字リテラルとして扱われる（例：`"price: $100"`）
+- ダブルクォート文字列内では `$` `{` `}` は予約されており、リテラルにするには `\$` `\{` `\}` と書く (例: `"price: \$100"`)。素の `$` はリテラルではなくパースエラー。(シングルクォート文字列にこの制約はない: `'price: $100'` は可。)
 - 補間式（`${...}`）内で `?:` の右辺に書いたクォートなしの識別子は**変数名**として扱われる。
   リテラル文字列をフォールバックとして使うにはクォートが必要：`${VAR ?: "テキスト"}` または `${VAR ?: 'テキスト'}`。
 
@@ -766,27 +797,49 @@ message = "Hello, ${NAME ?: 'stranger'}! Port is ${PORT ?: 8080}.";
 
 # 9. 文字列内のエスケープ記法
 
-- `\` をエスケープ用の文字として使用します。
-- `\` 自体を表したい場合には `\\` のように二重にする事で表現できます。
+`\` をエスケープ文字として使います。エスケープは 2 種類あります:
 
-## "\\xXX" 形式
+- **`\` + 印字可能な ASCII 記号 -> その記号そのもの (リテラル)**。全ての ASCII
+  記号にこの形があります (例: `\!` -> `!`, `\,` -> `,`, `\$` -> `$`)。`\` 自体は
+  `\\`。スペースのエスケープは無く、`\ ` (バックスラッシュ + スペース) は不正です
+  (スペースは素で書きます)。
+- **`\` + 英字または数字 -> 下記の定義済みの意味のみ**。それ以外の英字/数字
+  エスケープは予約であり、パースエラーになります (例: `\z`, `\9`)。
 
-- 値に指定できるのは 0 から 127 まで (すなわち `\x00` から `\x7F` まで) です。
+| エスケープ | 意味 |
+| --- | --- |
+| `\n` | ラインフィード (U+000A) |
+| `\r` | キャリッジリターン (U+000D) |
+| `\t` | 水平タブ (U+0009) |
+| `\0` | NUL (U+0000) |
+| `\xHH` | 1 バイト, 16進 2 桁, 範囲 `\x00`-`\x7F` (文法上、先頭桁は `0`-`7`) |
+| `\uXXXX` | Unicode コードポイント, 16進 4 桁 (BMP) |
+| `\UXXXXXXXX` | Unicode コードポイント, 16進 8 桁 |
 
-## "\\uXXXX" 形式
+> サロゲートコードポイント (`\uD800`-`\uDFFF`) は単体では有効ではありません。
+> BMP 外は `\U` を使ってください。
 
-- `\uD800` から `\uDFFF` までは出現してはいけません。
+## ダブルクォートとシングルクォート
 
-## "\\UXXXXXXXX" 形式
+上のエスケープ表は**両者で同一**です。違うのは「どの文字を必ずエスケープする必要が
+あるか」と「`${...}` が補間されるか」だけです:
 
-- 先頭二桁は "00" である事が予測されます。
+| | ダブルクォート `"..."` | シングルクォート `'...'` |
+| --- | --- | --- |
+| `${...}` 補間 | あり (5 章参照) | なし -- 常にリテラル |
+| `"` | 要エスケープ (`\"`) | 素で可 |
+| `'` | 素で可 | 要エスケープ (`\'`) |
+| `$` `{` `}` | 要エスケープ -- 補間用に予約 | 素で可 |
+| `\` | 要エスケープ (`\\`) | 要エスケープ (`\\`) |
+| その他の ASCII 記号 | 素で可 (エスケープ形も可) | 素で可 (エスケープ形も可) |
 
-## 個別のエスケープ文字
+シングルクォート文字列は**最小限の必須エスケープ**です: 使えるエスケープはダブル
+クォートと同じですが、必須なのは `'` と `\` だけです。補間しないので `$` `{` `}` `"`
+は全て素で書けます。これは「raw」文字列ではありません -- エスケープは効きます。
+単に必須のものが少ないだけです。
 
-- `\t` 水平タブ
-- `\r` キャリッジリターン
-- `\n` ラインフィード
-- `\\` バックスラッシュ (再掲)
-- `\0` NUL 文字
-- `\"` ダブルクォート (ダブルクォート文字列内で自身を表現)
-- `\'` シングルクォート (シングルクォート文字列内で自身を表現)
+## 安定性保証
+
+エスケープした ASCII 記号の意味 (`\<記号>` = その記号) は将来も変わりません。一方、
+**素の** ASCII 記号は将来のバージョンで special な意味を得る可能性があります (破壊的
+変更)。不安なら記号をエスケープしておけば、そのリテラルの意味は保証されます。
