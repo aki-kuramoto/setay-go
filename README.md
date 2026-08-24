@@ -14,6 +14,7 @@ Setay is a human-friendly data serialization format designed for configuration f
 
 - **`encoding/json`-style API** — `Marshal`, `Unmarshal`, `MarshalFile`, `UnmarshalFile`
 - **Struct tags** — `setay:"name,omitempty"`, `setay:"-"`
+- **Strict decoding** — `Unmarshal(..., DisallowUnknownFields())` reports unknown keys (as an `*UnknownFieldsError`) instead of ignoring them
 - **Rich data types** — strings, integers (decimal/hex/binary/octal), floats, booleans, null, `UtcTs` timestamps
 - **Sets** — `map[K]struct{}` marshals/unmarshals as `{ key=; ... }` set syntax
 - **Flag entries** — a value-less key `{ verbose; ... }` denotes the boolean `true` (present = true, absent = false)
@@ -98,6 +99,30 @@ if err := setay.Unmarshal(input, &cfg); err != nil {
 fmt.Printf("%+v\n", cfg)
 // {Name:my-app Port:8080 Debug:false Tags:[web api]}
 ```
+
+#### Rejecting unknown keys
+
+By default, a dict key with no matching struct field is silently ignored, just
+like `encoding/json`. Pass `DisallowUnknownFields()` to have unknown keys
+reported instead. Every unknown key in the whole document is collected and
+returned together as an `*UnknownFieldsError`, each as a dotted path from the
+root:
+
+```go
+var cfg Config
+err := setay.Unmarshal(input, &cfg, setay.DisallowUnknownFields())
+
+var ufe *setay.UnknownFieldsError
+if errors.As(err, &ufe) {
+    // ufe.Keys == []string{"bogus", "server.tls.oops"}, in document order
+    for _, key := range ufe.Keys {
+        log.Printf("unknown key: %s", key)
+    }
+}
+```
+
+`UnmarshalFile` accepts the same option. This only affects struct targets — a
+map target (e.g. `map[string]any`) has no notion of an unknown key.
 
 ### File I/O
 
@@ -371,6 +396,7 @@ setay は設定ファイルや構造化データの保存を目的に設計さ�
 
 - **`encoding/json` スタイルの API** — `Marshal`, `Unmarshal`, `MarshalFile`, `UnmarshalFile`
 - **構造体タグ** — `setay:"name,omitempty"`, `setay:"-"`
+- **厳格デコード** — `Unmarshal(..., DisallowUnknownFields())` で未知のキーを無視せず `*UnknownFieldsError` として報告
 - **豊富なデータ型** — 文字列、整数（10進/16進/2進/8進）、浮動小数点、真偽値、null、`UtcTs` タイムスタンプ
 - **セット** — `map[K]struct{}` を `{ key=; ... }` のセット記法でマーシャル/アンマーシャル
 - **フラグエントリ** — 値を持たないキー `{ verbose; ... }` は真偽値 `true` を表す（存在 = true, 不在 = false）
@@ -455,6 +481,25 @@ if err := setay.Unmarshal(input, &cfg); err != nil {
 fmt.Printf("%+v\n", cfg)
 // {Name:my-app Port:8080 Debug:false Tags:[web api]}
 ```
+
+#### 未知のキーをエラーにする
+
+既定では、対応する struct フィールドが無い dict キーは `encoding/json` と同様に黙って無視されます。`DisallowUnknownFields()` を渡すと、未知のキーをエラーとして報告します。文書全体の未知キーを全て集め、それぞれ root からのドット区切りパスとして 1 つの `*UnknownFieldsError` にまとめて返します:
+
+```go
+var cfg Config
+err := setay.Unmarshal(input, &cfg, setay.DisallowUnknownFields())
+
+var ufe *setay.UnknownFieldsError
+if errors.As(err, &ufe) {
+    // ufe.Keys == []string{"bogus", "server.tls.oops"} (文書の出現順)
+    for _, key := range ufe.Keys {
+        log.Printf("unknown key: %s", key)
+    }
+}
+```
+
+`UnmarshalFile` も同じオプションを受け取ります。これが効くのは struct ターゲットのみです -- map ターゲット (`map[string]any` など) には「未知のキー」という概念がありません。
 
 ### ファイル入出力
 

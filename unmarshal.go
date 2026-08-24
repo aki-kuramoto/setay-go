@@ -9,11 +9,19 @@ import (
 	"time"
 )
 
-// Unmarshal parses setay-encoded data and stores the result in the value pointed to by v.
-func Unmarshal(data []byte, v interface{}) error {
+// Unmarshal parses setay-encoded data and stores the result in the value pointed
+// to by v. By default an unknown dict key (one with no matching struct field) is
+// ignored, like encoding/json. Pass DisallowUnknownFields to have every unknown
+// key reported together as an *UnknownFieldsError instead.
+func Unmarshal(data []byte, v interface{}, opts ...UnmarshalOption) error {
 	rv := reflect.ValueOf(v)
 	if rv.Kind() != reflect.Ptr || rv.IsNil() {
 		return fmt.Errorf("setay: Unmarshal requires a non-nil pointer")
+	}
+
+	var o unmarshalOpts
+	for _, opt := range opts {
+		opt(&o)
 	}
 
 	source := string(data)
@@ -30,21 +38,81 @@ func Unmarshal(data []byte, v interface{}) error {
 		return fmt.Errorf("setay: parse incomplete (consumed %d of %d characters)", start+length, len(runes))
 	}
 
-	u := &unmarshaler{source: runes}
-	return u.unmarshalDict(doc.Dict, rv.Elem())
+	u := &unmarshaler{source: runes, disallowUnknownFields: o.disallowUnknownFields}
+	if err := u.unmarshalDict(doc.Dict, rv.Elem()); err != nil {
+		return err
+	}
+	if len(u.unknown) > 0 {
+		return &UnknownFieldsError{Keys: u.unknown}
+	}
+	return nil
 }
 
-// UnmarshalFile reads a setay file and parses it into v.
-func UnmarshalFile(filename string, v interface{}) error {
+// UnmarshalFile reads a setay file and parses it into v. It accepts the same
+// options as Unmarshal.
+func UnmarshalFile(filename string, v interface{}, opts ...UnmarshalOption) error {
 	data, err := os.ReadFile(filename)
 	if err != nil {
 		return err
 	}
-	return Unmarshal(data, v)
+	return Unmarshal(data, v, opts...)
+}
+
+// UnmarshalOption configures an Unmarshal (or UnmarshalFile) call.
+type UnmarshalOption func(*unmarshalOpts)
+
+type unmarshalOpts struct {
+	disallowUnknownFields bool
+}
+
+// DisallowUnknownFields makes Unmarshal report any dict key that does not map to
+// a struct field, instead of silently ignoring it (the default, matching
+// encoding/json). All such keys across the whole document are collected and
+// returned together as an *UnknownFieldsError.
+//
+// This only concerns struct targets: a map target (e.g. map[string]any) has no
+// notion of an unknown key, so the option has no effect there.
+func DisallowUnknownFields() UnmarshalOption {
+	return func(o *unmarshalOpts) { o.disallowUnknownFields = true }
+}
+
+// UnknownFieldsError reports dict keys that did not map to any struct field when
+// Unmarshal was called with DisallowUnknownFields. Keys holds dotted paths from
+// the document root (e.g. "server.tls.foo"), in the order they appear in the
+// document.
+type UnknownFieldsError struct {
+	Keys []string
+}
+
+func (e *UnknownFieldsError) Error() string {
+	if len(e.Keys) == 1 {
+		return fmt.Sprintf("setay: unknown field %q", e.Keys[0])
+	}
+	return fmt.Sprintf("setay: %d unknown fields: %s", len(e.Keys), strings.Join(e.Keys, ", "))
 }
 
 type unmarshaler struct {
 	source []rune
+
+	// disallowUnknownFields, when set, collects (rather than ignores) dict keys
+	// with no matching struct field. unknown holds their dotted paths; path is
+	// the stack of segments for the container currently being decoded.
+	disallowUnknownFields bool
+	unknown               []string
+	path                  []string
+}
+
+func (u *unmarshaler) pushPath(seg string) { u.path = append(u.path, seg) }
+func (u *unmarshaler) popPath()            { u.path = u.path[:len(u.path)-1] }
+
+// recordUnknown notes a dict key that matched no struct field, as a dotted path
+// from the document root.
+func (u *unmarshaler) recordUnknown(key string) {
+	if len(u.path) == 0 {
+		u.unknown = append(u.unknown, key)
+		return
+	}
+	u.unknown = append(u.unknown, strings.Join(u.path, ".")+"."+key)
 }
 
 // textOf extracts the source text for a node.
@@ -162,7 +230,12 @@ func (u *unmarshaler) setStructField(entry *DefSetayDictEntry, target reflect.Va
 		idx, ok = fieldMap[strings.ToLower(keyText)]
 	}
 	if !ok {
-		// Unknown field — skip silently (like encoding/json)
+		// Unknown field. By default it is ignored (like encoding/json); with
+		// DisallowUnknownFields its path is recorded and collection continues so
+		// that every unknown key is reported, not just the first.
+		if u.disallowUnknownFields {
+			u.recordUnknown(keyText)
+		}
 		return nil
 	}
 
@@ -174,7 +247,10 @@ func (u *unmarshaler) setStructField(entry *DefSetayDictEntry, target reflect.Va
 		// true/false without anything to do here for the absent case.)
 		return u.setBool(fieldVal, true)
 	}
-	return u.unmarshalValue(entryValue(entry), fieldVal)
+	u.pushPath(keyText)
+	err := u.unmarshalValue(entryValue(entry), fieldVal)
+	u.popPath()
+	return err
 }
 
 func (u *unmarshaler) setMapEntry(entry *DefSetayDictEntry, target reflect.Value, valType reflect.Type) error {
@@ -187,8 +263,13 @@ func (u *unmarshaler) setMapEntry(entry *DefSetayDictEntry, target reflect.Value
 		if err := u.setBool(val, true); err != nil {
 			return err
 		}
-	} else if err := u.unmarshalValue(entryValue(entry), val); err != nil {
-		return err
+	} else {
+		u.pushPath(keyText)
+		err := u.unmarshalValue(entryValue(entry), val)
+		u.popPath()
+		if err != nil {
+			return err
+		}
 	}
 	target.SetMapIndex(reflect.ValueOf(keyText), val)
 	return nil
@@ -371,7 +452,10 @@ func (u *unmarshaler) unmarshalList(list *DefSetayList, target reflect.Value) er
 	values := collectValues(elements)
 	slice := reflect.MakeSlice(target.Type(), len(values), len(values))
 	for i, val := range values {
-		if err := u.unmarshalValue(val, slice.Index(i)); err != nil {
+		u.pushPath(strconv.Itoa(i))
+		err := u.unmarshalValue(val, slice.Index(i))
+		u.popPath()
+		if err != nil {
 			return err
 		}
 	}
