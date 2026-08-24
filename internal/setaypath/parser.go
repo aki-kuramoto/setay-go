@@ -231,14 +231,14 @@ type DefSetayPathDigit struct {
 
 func (n *DefSetayPathDigit) GetAuthority() *Authority { return n.Authority }
 
-// DefSetayPathBareKey is the parse result of the SetayPathBareKey rule.
-type DefSetayPathBareKey struct {
+// DefSetayPathUnquotedKey is the parse result of the SetayPathUnquotedKey rule.
+type DefSetayPathUnquotedKey struct {
 	Authority *Authority
 	FirstCh *DefSetayPathKeyLead
 	Trailing []*DefSetayPathKeyTrailing
 }
 
-func (n *DefSetayPathBareKey) GetAuthority() *Authority { return n.Authority }
+func (n *DefSetayPathUnquotedKey) GetAuthority() *Authority { return n.Authority }
 
 // DefSetayPathKeyTrailing is the parse result of the SetayPathKeyTrailing rule.
 type DefSetayPathKeyTrailing struct {
@@ -574,7 +574,7 @@ func (p *PackratParser) parseSetayPathSegment(pos int) (*DefSetayPathSegment, in
 			}
 		}
 		if !choiceMatched {
-			node, end, err := p.parseSetayPathBareKey(pos)
+			node, end, err := p.parseSetayPathUnquotedKey(pos)
 			if err == nil {
 				result.AnonymousField1 = node
 				pos = end
@@ -744,12 +744,12 @@ func (p *PackratParser) parseSetayPathDigit(pos int) (*DefSetayPathDigit, int, e
 	return result, pos, nil
 }
 
-func (p *PackratParser) parseSetayPathBareKey(pos int) (*DefSetayPathBareKey, int, error) {
-	if m, ok := p.getMemo("SetayPathBareKey", pos); ok {
+func (p *PackratParser) parseSetayPathUnquotedKey(pos int) (*DefSetayPathUnquotedKey, int, error) {
+	if m, ok := p.getMemo("SetayPathUnquotedKey", pos); ok {
 		if m.err != nil {
 			return nil, m.end, m.err
 		}
-		return m.node.(*DefSetayPathBareKey), m.end, nil
+		return m.node.(*DefSetayPathUnquotedKey), m.end, nil
 	}
 
 	if err := p.enterRule(); err != nil {
@@ -758,13 +758,13 @@ func (p *PackratParser) parseSetayPathBareKey(pos int) (*DefSetayPathBareKey, in
 	defer p.leaveRule()
 
 	startPos := pos
-	result := &DefSetayPathBareKey{}
+	result := &DefSetayPathUnquotedKey{}
 
 	// Field: FirstCh (Reference -> SetayPathKeyLead)
 	{
 		node, end, err := p.parseSetayPathKeyLead(pos)
 		if err != nil {
-			p.memoize("SetayPathBareKey", startPos, nil, pos, err)
+			p.memoize("SetayPathUnquotedKey", startPos, nil, pos, err)
 			return nil, pos, err
 		}
 		result.FirstCh = node
@@ -785,7 +785,7 @@ func (p *PackratParser) parseSetayPathBareKey(pos int) (*DefSetayPathBareKey, in
 		}
 	}
 	result.Authority = p.makeAuthority(startPos, pos)
-	p.memoize("SetayPathBareKey", startPos, result, pos, nil)
+	p.memoize("SetayPathUnquotedKey", startPos, result, pos, nil)
 	return result, pos, nil
 }
 

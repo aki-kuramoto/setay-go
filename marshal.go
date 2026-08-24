@@ -369,17 +369,17 @@ func (m *marshaler) marshalInlineValue(v reflect.Value, depth int) {
 	}
 }
 
-// writeKey writes a dict key. Uses bare key if valid, otherwise quoted.
+// writeKey writes a dict key. Uses an unquoted key if valid, otherwise quoted.
 func (m *marshaler) writeKey(key string) {
-	if isValidBareKey(key) {
+	if isValidUnquotedKey(key) {
 		m.out.WriteString(key)
 	} else {
 		m.writeString(key)
 	}
 }
 
-// isValidBareKey checks if a string can be used as an unquoted key.
-func isValidBareKey(s string) bool {
+// isValidUnquotedKey checks if a string can be used as an unquoted key.
+func isValidUnquotedKey(s string) bool {
 	if len(s) == 0 {
 		return false
 	}

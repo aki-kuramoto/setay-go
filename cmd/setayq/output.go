@@ -180,13 +180,13 @@ func valueToSetayPretty(v *Value, depth int, indent string, raw bool, color bool
 }
 
 func formatKey(k string) string {
-	if isBareKey(k) {
+	if isUnquotedKey(k) {
 		return k
 	}
 	return escapeSetayString(k)
 }
 
-func isBareKey(s string) bool {
+func isUnquotedKey(s string) bool {
 	if len(s) == 0 {
 		return false
 	}

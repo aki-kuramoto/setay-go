@@ -38,7 +38,7 @@ func TestPathGrammarAcceptReject(t *testing.T) {
 		":/a..b",    // empty segment
 		":/1abc",    // a segment starting with a digit is an index, "abc" is leftover
 		":/-",       // an index needs at least one digit
-		":/my-",     // bare key cannot end with a hyphen
+		":/my-",     // unquoted key cannot end with a hyphen
 		":/a b",     // no whitespace inside a path
 		":/a[0]",    // brackets are not the index syntax here
 		`:/"a${b}"`, // DQ reserves $ { } (must be escaped)

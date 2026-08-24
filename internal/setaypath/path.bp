@@ -1,8 +1,8 @@
 # Grammar for setay value-addressing paths. See docs/setay-path-notation.ja.md.
 # A path is ":/" (the root marker, one atomic token) followed by "."-separated
 # segments. Each segment selects a dict key or a list index:
-#   - a bare key (LenientIdentifier: [A-Za-z_] then [A-Za-z0-9_-]*, no leading or
-#     trailing hyphen),
+#   - an unquoted key (LenientIdentifier: [A-Za-z_] then [A-Za-z0-9_-]*, no
+#     leading or trailing hyphen),
 #   - a quoted key (a setay string, DQ or SQ, that does NOT interpolate; DQ
 #     reserves $ { }, SQ needs only ' and \ escaped), or
 #   - a numeric list index, optionally negative.
@@ -25,7 +25,7 @@ def SetayPathSegmentSep
 
 def SetayPathSegment
 {
-	_: SetayPathIndex or SetayPathBareKey or SetayPathQuotedKey;
+	_: SetayPathIndex or SetayPathUnquotedKey or SetayPathQuotedKey;
 };
 
 # --- Numeric list index (optionally negative) ---
@@ -46,9 +46,9 @@ def SetayPathDigit
 	_: char-range<'0','9'>;
 };
 
-# --- Bare key = LenientIdentifier ---
+# --- Unquoted key = LenientIdentifier ---
 
-def SetayPathBareKey
+def SetayPathUnquotedKey
 {
 	firstCh: SetayPathKeyLead;
 	trailing: zero-or-one<SetayPathKeyTrailing>;

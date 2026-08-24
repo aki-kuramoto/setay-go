@@ -16,6 +16,7 @@ Setay is a human-friendly data serialization format designed for configuration f
 - **Struct tags** — `setay:"name,omitempty"`, `setay:"-"`
 - **Rich data types** — strings, integers (decimal/hex/binary/octal), floats, booleans, null, `UtcTs` timestamps
 - **Sets** — `map[K]struct{}` marshals/unmarshals as `{ key=; ... }` set syntax
+- **Flag entries** — a value-less key `{ verbose; ... }` denotes the boolean `true` (present = true, absent = false)
 - **Variable references** — `${VAR_NAME}` syntax resolves environment variables or custom resolver values at unmarshal time, with `?:` fallback chains and string interpolation
 - **[wantai](https://github.com/aki-kuramoto/wantai) integration** — Native support for wantai's typed UTC timestamp wrappers
 - **CLI formatter** — `setay fmt` to format `.setay` files in the standard style
@@ -151,6 +152,41 @@ setay.Unmarshal([]byte(input), &loaded)
 - Set keys must be scalar values (int, float, string, bool, null, timestamp, or variable reference)
 - `map[K]struct{}` cannot be used as the top-level document
 
+## Flag Entries
+
+A dict entry may be written as a key alone, with the `= value` part omitted. This
+is a **flag entry**, and it denotes the boolean `true`. A flag entry and
+`key = true` are two spellings of the same value — handy for DSL-like configs
+where presence itself is the meaning.
+
+```go
+type Options struct {
+    Verbose bool `setay:"verbose"`
+    Debug   bool `setay:"debug"`
+    Quiet   bool `setay:"quiet"`
+}
+
+input := `{
+    verbose;        # flag entry — same as verbose = true
+    debug = true;   # the value spelled out
+}`
+var o Options
+setay.Unmarshal([]byte(input), &o)
+// o.Verbose == true, o.Debug == true, o.Quiet == false (absent)
+```
+
+**Rules:**
+- A flag entry denotes `true`; an absent key leaves a `bool` field `false`
+- Into a struct `bool` field, or a map value type of `bool` or `any`, a flag
+  entry yields `true`; into any other target type it is an error
+  - (The target must be `bool`: a `null`/pointer cannot tell "unspecified" apart
+    from "explicitly false", which is the whole point of a flag)
+- `Marshal` is intentionally lossy in reverse: a `true` is always written as
+  `= true`, never collapsed to a flag entry. Round-trip editing (the `Document`
+  API) preserves whichever spelling the author used, in both directions
+- A flag entry (`{ key; }`) is **not** the Set type (`{ key=; }`), which is a
+  separate value kind terminated by the atomic token `=;`
+
 ## Variable References
 
 At unmarshal time, `${VAR_NAME}` is replaced with the value of the named variable. By default, variables are resolved from the process's environment (via `os.LookupEnv`). You can also register a custom resolver to source values from a database, secrets manager, or any other location.
@@ -175,7 +211,7 @@ At unmarshal time, `${VAR_NAME}` is replaced with the value of the named variabl
 
 **Key rules:**
 
-- `${VAR_NAME}` — refers to a variable by name (bare identifier, same rules as a bare key)
+- `${VAR_NAME}` — refers to a variable by name (unquoted identifier, same rules as an unquoted key)
 - `?: value` — fallback if the variable is not defined; can chain: `?: A ?: B ?: "final"`
 - Fallback values can be: another variable name, an integer/float literal, a quoted string
   > **Note:** A bare word after `?:` (e.g. `${VAR ?: fallback}`) is treated as a **variable name**,
@@ -337,6 +373,7 @@ setay は設定ファイルや構造化データの保存を目的に設計さ�
 - **構造体タグ** — `setay:"name,omitempty"`, `setay:"-"`
 - **豊富なデータ型** — 文字列、整数（10進/16進/2進/8進）、浮動小数点、真偽値、null、`UtcTs` タイムスタンプ
 - **セット** — `map[K]struct{}` を `{ key=; ... }` のセット記法でマーシャル/アンマーシャル
+- **フラグエントリ** — 値を持たないキー `{ verbose; ... }` は真偽値 `true` を表す（存在 = true, 不在 = false）
 - **変数参照** — `${VAR_NAME}` 構文でアンマーシャル時に環境変数やカスタムリゾルバーから値を解決。`?:` フォールバックチェーンと文字列補間に対応
 - **[wantai](https://github.com/aki-kuramoto/wantai) 連携** — wantai の型付き UTC タイムスタンプラッパーをネイティブサポート
 - **CLI フォーマッター** — `setay fmt` で `.setay` ファイルを標準スタイルに整形
@@ -471,6 +508,33 @@ setay.Unmarshal([]byte(input), &loaded)
 - `=;` の直前にスペースは許可、`=;` 内部にスペース不可
 - セットのキーはスカラー値のみ（int, float, string, bool, null, タイムスタンプ、変数参照）
 - `map[K]struct{}` はトップレベルのドキュメントには使用不可
+
+## フラグエントリ
+
+ディクトのエントリは、キーだけを書いて `= value` を省略できます。これを**フラグエントリ**と呼び、真偽値 `true` を表します。`key;` と `key = true;` は同じ値の 2 通りの綴りで、「存在すること自体が意味を持つ」DSL 的な設定に向いています。
+
+```go
+type Options struct {
+    Verbose bool `setay:"verbose"`
+    Debug   bool `setay:"debug"`
+    Quiet   bool `setay:"quiet"`
+}
+
+input := `{
+    verbose;        # フラグエントリ -- verbose = true と同じ
+    debug = true;   # 値を明示した書き方
+}`
+var o Options
+setay.Unmarshal([]byte(input), &o)
+// o.Verbose == true, o.Debug == true, o.Quiet == false (未指定)
+```
+
+**ルール:**
+- フラグエントリは `true` を表す; キーが無い場合、`bool` フィールドは `false` のまま
+- struct の `bool` フィールド、または map の値型が `bool`・`any` の場合、フラグエントリは `true` になる; それ以外の型はエラー
+  - (対象は `bool` である必要がある: `null`/ポインタでは「未指定」と「明示的に false」を区別できず、それこそがフラグの目的)
+- `Marshal` は逆方向では意図的に lossy: `true` は常に `= true` と出力され、フラグエントリには畳まれない。往復編集 (`Document` API) は作者が書いた綴りを両方向とも保持する
+- フラグエントリ (`{ key; }`) はセット型 (`{ key=; }`) とは別物。セットはアトミックなトークン `=;` で終端する独立した値種別
 
 ## 変数参照
 

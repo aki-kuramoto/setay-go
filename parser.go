@@ -325,13 +325,21 @@ func (n *DefSetayTrailingSemicolon) GetAuthority() *Authority { return n.Authori
 type DefSetayDictEntry struct {
 	Authority *Authority
 	Key *DefSetayDictKey
+	Assign []*DefSetayDictEntryAssign
+}
+
+func (n *DefSetayDictEntry) GetAuthority() *Authority { return n.Authority }
+
+// DefSetayDictEntryAssign is the parse result of the SetayDictEntryAssign rule.
+type DefSetayDictEntryAssign struct {
+	Authority *Authority
 	AnonymousField1 *DefSetaySpacing
 	AnonymousField2 StringFromSource
 	AnonymousField3 *DefSetaySpacing
 	Value *DefSetayValue
 }
 
-func (n *DefSetayDictEntry) GetAuthority() *Authority { return n.Authority }
+func (n *DefSetayDictEntryAssign) GetAuthority() *Authority { return n.Authority }
 
 // DefSetayDictKey is the parse result of the SetayDictKey rule.
 type DefSetayDictKey struct {
@@ -341,47 +349,47 @@ type DefSetayDictKey struct {
 
 func (n *DefSetayDictKey) GetAuthority() *Authority { return n.Authority }
 
-// DefSetayBareKey is the parse result of the SetayBareKey rule.
-type DefSetayBareKey struct {
+// DefSetayUnquotedKey is the parse result of the SetayUnquotedKey rule.
+type DefSetayUnquotedKey struct {
 	Authority *Authority
-	FirstCh *DefSetayBareKeyLeadChar
-	Trailing []*DefSetayBareKeyTrailingPart
+	FirstCh *DefSetayUnquotedKeyLeadChar
+	Trailing []*DefSetayUnquotedKeyTrailingPart
 }
 
-func (n *DefSetayBareKey) GetAuthority() *Authority { return n.Authority }
+func (n *DefSetayUnquotedKey) GetAuthority() *Authority { return n.Authority }
 
-// DefSetayBareKeyTrailingPart is the parse result of the SetayBareKeyTrailingPart rule.
-type DefSetayBareKeyTrailingPart struct {
+// DefSetayUnquotedKeyTrailingPart is the parse result of the SetayUnquotedKeyTrailingPart rule.
+type DefSetayUnquotedKeyTrailingPart struct {
 	Authority *Authority
-	MidChars []*DefSetayBareKeyContinueChar
-	LastCh *DefSetayBareKeyTrailingChar
+	MidChars []*DefSetayUnquotedKeyContinueChar
+	LastCh *DefSetayUnquotedKeyTrailingChar
 }
 
-func (n *DefSetayBareKeyTrailingPart) GetAuthority() *Authority { return n.Authority }
+func (n *DefSetayUnquotedKeyTrailingPart) GetAuthority() *Authority { return n.Authority }
 
-// DefSetayBareKeyLeadChar is the parse result of the SetayBareKeyLeadChar rule.
-type DefSetayBareKeyLeadChar struct {
-	Authority *Authority
-	AnonymousField1 ParseNode
-}
-
-func (n *DefSetayBareKeyLeadChar) GetAuthority() *Authority { return n.Authority }
-
-// DefSetayBareKeyContinueChar is the parse result of the SetayBareKeyContinueChar rule.
-type DefSetayBareKeyContinueChar struct {
+// DefSetayUnquotedKeyLeadChar is the parse result of the SetayUnquotedKeyLeadChar rule.
+type DefSetayUnquotedKeyLeadChar struct {
 	Authority *Authority
 	AnonymousField1 ParseNode
 }
 
-func (n *DefSetayBareKeyContinueChar) GetAuthority() *Authority { return n.Authority }
+func (n *DefSetayUnquotedKeyLeadChar) GetAuthority() *Authority { return n.Authority }
 
-// DefSetayBareKeyTrailingChar is the parse result of the SetayBareKeyTrailingChar rule.
-type DefSetayBareKeyTrailingChar struct {
+// DefSetayUnquotedKeyContinueChar is the parse result of the SetayUnquotedKeyContinueChar rule.
+type DefSetayUnquotedKeyContinueChar struct {
 	Authority *Authority
 	AnonymousField1 ParseNode
 }
 
-func (n *DefSetayBareKeyTrailingChar) GetAuthority() *Authority { return n.Authority }
+func (n *DefSetayUnquotedKeyContinueChar) GetAuthority() *Authority { return n.Authority }
+
+// DefSetayUnquotedKeyTrailingChar is the parse result of the SetayUnquotedKeyTrailingChar rule.
+type DefSetayUnquotedKeyTrailingChar struct {
+	Authority *Authority
+	AnonymousField1 ParseNode
+}
+
+func (n *DefSetayUnquotedKeyTrailingChar) GetAuthority() *Authority { return n.Authority }
 
 // DefSetayList is the parse result of the SetayList rule.
 type DefSetayList struct {
@@ -823,8 +831,8 @@ func (n *DefSetayVarExpr) GetAuthority() *Authority { return n.Authority }
 // DefSetayVarName is the parse result of the SetayVarName rule.
 type DefSetayVarName struct {
 	Authority *Authority
-	FirstCh *DefSetayBareKeyLeadChar
-	Trailing []*DefSetayBareKeyTrailingPart
+	FirstCh *DefSetayUnquotedKeyLeadChar
+	Trailing []*DefSetayUnquotedKeyTrailingPart
 }
 
 func (n *DefSetayVarName) GetAuthority() *Authority { return n.Authority }
@@ -1907,11 +1915,46 @@ func (p *PackratParser) parseSetayDictEntry(pos int) (*DefSetayDictEntry, int, e
 		result.Key = node
 		pos = end
 	}
+	// Field: Assign (Repeat)
+	{
+		var repCount int
+		for {
+			repCount++
+			if repCount > MaxRepeatCount { return nil, pos, ErrRepeatLimitExceeded }
+			node, end, err := p.parseSetayDictEntryAssign(pos)
+			if err != nil { break }
+			if end == pos { break } // prevent zero-length match
+			result.Assign = append(result.Assign, node)
+			pos = end
+			if len(result.Assign) >= 1 { break }
+		}
+	}
+	result.Authority = p.makeAuthority(startPos, pos)
+	p.memoize("SetayDictEntry", startPos, result, pos, nil)
+	return result, pos, nil
+}
+
+func (p *PackratParser) parseSetayDictEntryAssign(pos int) (*DefSetayDictEntryAssign, int, error) {
+	if m, ok := p.getMemo("SetayDictEntryAssign", pos); ok {
+		if m.err != nil {
+			return nil, m.end, m.err
+		}
+		return m.node.(*DefSetayDictEntryAssign), m.end, nil
+	}
+
+	if err := p.enterRule(); err != nil {
+		return nil, pos, err
+	}
+	defer p.leaveRule()
+
+	startPos := pos
+	result := &DefSetayDictEntryAssign{}
+
 	// Field: AnonymousField1 (Reference -> SetaySpacing)
 	{
 		node, end, err := p.parseSetaySpacing(pos)
 		if err != nil {
-			p.memoize("SetayDictEntry", startPos, nil, pos, err)
+			p.memoize("SetayDictEntryAssign", startPos, nil, pos, err)
 			return nil, pos, err
 		}
 		result.AnonymousField1 = node
@@ -1922,7 +1965,7 @@ func (p *PackratParser) parseSetayDictEntry(pos int) (*DefSetayDictEntry, int, e
 		expected := []rune("=")
 		if pos+len(expected) > len(p.input) {
 			err := fmt.Errorf("line %d: expected %q, got EOF", p.lineAt(pos), "=")
-			p.memoize("SetayDictEntry", startPos, nil, pos, err)
+			p.memoize("SetayDictEntryAssign", startPos, nil, pos, err)
 			return nil, pos, err
 		}
 		matched := true
@@ -1931,7 +1974,7 @@ func (p *PackratParser) parseSetayDictEntry(pos int) (*DefSetayDictEntry, int, e
 		}
 		if !matched {
 			err := fmt.Errorf("line %d: expected %q", p.lineAt(pos), "=")
-			p.memoize("SetayDictEntry", startPos, nil, pos, err)
+			p.memoize("SetayDictEntryAssign", startPos, nil, pos, err)
 			return nil, pos, err
 		}
 		result.AnonymousField2 = p.makeStringFromSource(pos, pos+len(expected))
@@ -1941,7 +1984,7 @@ func (p *PackratParser) parseSetayDictEntry(pos int) (*DefSetayDictEntry, int, e
 	{
 		node, end, err := p.parseSetaySpacing(pos)
 		if err != nil {
-			p.memoize("SetayDictEntry", startPos, nil, pos, err)
+			p.memoize("SetayDictEntryAssign", startPos, nil, pos, err)
 			return nil, pos, err
 		}
 		result.AnonymousField3 = node
@@ -1951,14 +1994,14 @@ func (p *PackratParser) parseSetayDictEntry(pos int) (*DefSetayDictEntry, int, e
 	{
 		node, end, err := p.parseSetayValue(pos)
 		if err != nil {
-			p.memoize("SetayDictEntry", startPos, nil, pos, err)
+			p.memoize("SetayDictEntryAssign", startPos, nil, pos, err)
 			return nil, pos, err
 		}
 		result.Value = node
 		pos = end
 	}
 	result.Authority = p.makeAuthority(startPos, pos)
-	p.memoize("SetayDictEntry", startPos, result, pos, nil)
+	p.memoize("SetayDictEntryAssign", startPos, result, pos, nil)
 	return result, pos, nil
 }
 
@@ -1982,7 +2025,7 @@ func (p *PackratParser) parseSetayDictKey(pos int) (*DefSetayDictKey, int, error
 	{
 		var choiceMatched bool
 		if !choiceMatched {
-			node, end, err := p.parseSetayBareKey(pos)
+			node, end, err := p.parseSetayUnquotedKey(pos)
 			if err == nil {
 				result.AnonymousField1 = node
 				pos = end
@@ -2008,12 +2051,12 @@ func (p *PackratParser) parseSetayDictKey(pos int) (*DefSetayDictKey, int, error
 	return result, pos, nil
 }
 
-func (p *PackratParser) parseSetayBareKey(pos int) (*DefSetayBareKey, int, error) {
-	if m, ok := p.getMemo("SetayBareKey", pos); ok {
+func (p *PackratParser) parseSetayUnquotedKey(pos int) (*DefSetayUnquotedKey, int, error) {
+	if m, ok := p.getMemo("SetayUnquotedKey", pos); ok {
 		if m.err != nil {
 			return nil, m.end, m.err
 		}
-		return m.node.(*DefSetayBareKey), m.end, nil
+		return m.node.(*DefSetayUnquotedKey), m.end, nil
 	}
 
 	if err := p.enterRule(); err != nil {
@@ -2022,13 +2065,13 @@ func (p *PackratParser) parseSetayBareKey(pos int) (*DefSetayBareKey, int, error
 	defer p.leaveRule()
 
 	startPos := pos
-	result := &DefSetayBareKey{}
+	result := &DefSetayUnquotedKey{}
 
-	// Field: FirstCh (Reference -> SetayBareKeyLeadChar)
+	// Field: FirstCh (Reference -> SetayUnquotedKeyLeadChar)
 	{
-		node, end, err := p.parseSetayBareKeyLeadChar(pos)
+		node, end, err := p.parseSetayUnquotedKeyLeadChar(pos)
 		if err != nil {
-			p.memoize("SetayBareKey", startPos, nil, pos, err)
+			p.memoize("SetayUnquotedKey", startPos, nil, pos, err)
 			return nil, pos, err
 		}
 		result.FirstCh = node
@@ -2040,7 +2083,7 @@ func (p *PackratParser) parseSetayBareKey(pos int) (*DefSetayBareKey, int, error
 		for {
 			repCount++
 			if repCount > MaxRepeatCount { return nil, pos, ErrRepeatLimitExceeded }
-			node, end, err := p.parseSetayBareKeyTrailingPart(pos)
+			node, end, err := p.parseSetayUnquotedKeyTrailingPart(pos)
 			if err != nil { break }
 			if end == pos { break } // prevent zero-length match
 			result.Trailing = append(result.Trailing, node)
@@ -2049,16 +2092,16 @@ func (p *PackratParser) parseSetayBareKey(pos int) (*DefSetayBareKey, int, error
 		}
 	}
 	result.Authority = p.makeAuthority(startPos, pos)
-	p.memoize("SetayBareKey", startPos, result, pos, nil)
+	p.memoize("SetayUnquotedKey", startPos, result, pos, nil)
 	return result, pos, nil
 }
 
-func (p *PackratParser) parseSetayBareKeyTrailingPart(pos int) (*DefSetayBareKeyTrailingPart, int, error) {
-	if m, ok := p.getMemo("SetayBareKeyTrailingPart", pos); ok {
+func (p *PackratParser) parseSetayUnquotedKeyTrailingPart(pos int) (*DefSetayUnquotedKeyTrailingPart, int, error) {
+	if m, ok := p.getMemo("SetayUnquotedKeyTrailingPart", pos); ok {
 		if m.err != nil {
 			return nil, m.end, m.err
 		}
-		return m.node.(*DefSetayBareKeyTrailingPart), m.end, nil
+		return m.node.(*DefSetayUnquotedKeyTrailingPart), m.end, nil
 	}
 
 	if err := p.enterRule(); err != nil {
@@ -2067,7 +2110,7 @@ func (p *PackratParser) parseSetayBareKeyTrailingPart(pos int) (*DefSetayBareKey
 	defer p.leaveRule()
 
 	startPos := pos
-	result := &DefSetayBareKeyTrailingPart{}
+	result := &DefSetayUnquotedKeyTrailingPart{}
 
 	// Field: MidChars (Repeat with backtracking)
 	{
@@ -2077,7 +2120,7 @@ func (p *PackratParser) parseSetayBareKeyTrailingPart(pos int) (*DefSetayBareKey
 		for {
 			repCount++
 			if repCount > MaxRepeatCount { return nil, pos, ErrRepeatLimitExceeded }
-			node, end, err := p.parseSetayBareKeyContinueChar(pos)
+			node, end, err := p.parseSetayUnquotedKeyContinueChar(pos)
 			if err != nil { break }
 			result.MidChars = append(result.MidChars, node)
 			pos = end
@@ -2087,7 +2130,7 @@ func (p *PackratParser) parseSetayBareKeyTrailingPart(pos int) (*DefSetayBareKey
 			var seqErr error
 			seqPos := pos
 			if seqErr == nil {
-				node, end, err := p.parseSetayBareKeyTrailingChar(seqPos)
+				node, end, err := p.parseSetayUnquotedKeyTrailingChar(seqPos)
 				if err != nil { seqErr = err } else {
 					result.LastCh = node
 					seqPos = end
@@ -2098,7 +2141,7 @@ func (p *PackratParser) parseSetayBareKeyTrailingPart(pos int) (*DefSetayBareKey
 				break // success
 			}
 			if len(result.MidChars) == 0 {
-				p.memoize("SetayBareKeyTrailingPart", startPos, nil, pos, seqErr)
+				p.memoize("SetayUnquotedKeyTrailingPart", startPos, nil, pos, seqErr)
 				return nil, pos, seqErr
 			}
 			result.MidChars = result.MidChars[:len(result.MidChars)-1]
@@ -2107,16 +2150,16 @@ func (p *PackratParser) parseSetayBareKeyTrailingPart(pos int) (*DefSetayBareKey
 		}
 	}
 	result.Authority = p.makeAuthority(startPos, pos)
-	p.memoize("SetayBareKeyTrailingPart", startPos, result, pos, nil)
+	p.memoize("SetayUnquotedKeyTrailingPart", startPos, result, pos, nil)
 	return result, pos, nil
 }
 
-func (p *PackratParser) parseSetayBareKeyLeadChar(pos int) (*DefSetayBareKeyLeadChar, int, error) {
-	if m, ok := p.getMemo("SetayBareKeyLeadChar", pos); ok {
+func (p *PackratParser) parseSetayUnquotedKeyLeadChar(pos int) (*DefSetayUnquotedKeyLeadChar, int, error) {
+	if m, ok := p.getMemo("SetayUnquotedKeyLeadChar", pos); ok {
 		if m.err != nil {
 			return nil, m.end, m.err
 		}
-		return m.node.(*DefSetayBareKeyLeadChar), m.end, nil
+		return m.node.(*DefSetayUnquotedKeyLeadChar), m.end, nil
 	}
 
 	if err := p.enterRule(); err != nil {
@@ -2125,7 +2168,7 @@ func (p *PackratParser) parseSetayBareKeyLeadChar(pos int) (*DefSetayBareKeyLead
 	defer p.leaveRule()
 
 	startPos := pos
-	result := &DefSetayBareKeyLeadChar{}
+	result := &DefSetayUnquotedKeyLeadChar{}
 
 	// Field: AnonymousField1 (Choice)
 	{
@@ -2160,21 +2203,21 @@ func (p *PackratParser) parseSetayBareKeyLeadChar(pos int) (*DefSetayBareKeyLead
 		}
 		if !choiceMatched {
 			err := fmt.Errorf("line %d: no choice matched for field AnonymousField1", p.lineAt(pos))
-			p.memoize("SetayBareKeyLeadChar", startPos, nil, pos, err)
+			p.memoize("SetayUnquotedKeyLeadChar", startPos, nil, pos, err)
 			return nil, pos, err
 		}
 	}
 	result.Authority = p.makeAuthority(startPos, pos)
-	p.memoize("SetayBareKeyLeadChar", startPos, result, pos, nil)
+	p.memoize("SetayUnquotedKeyLeadChar", startPos, result, pos, nil)
 	return result, pos, nil
 }
 
-func (p *PackratParser) parseSetayBareKeyContinueChar(pos int) (*DefSetayBareKeyContinueChar, int, error) {
-	if m, ok := p.getMemo("SetayBareKeyContinueChar", pos); ok {
+func (p *PackratParser) parseSetayUnquotedKeyContinueChar(pos int) (*DefSetayUnquotedKeyContinueChar, int, error) {
+	if m, ok := p.getMemo("SetayUnquotedKeyContinueChar", pos); ok {
 		if m.err != nil {
 			return nil, m.end, m.err
 		}
-		return m.node.(*DefSetayBareKeyContinueChar), m.end, nil
+		return m.node.(*DefSetayUnquotedKeyContinueChar), m.end, nil
 	}
 
 	if err := p.enterRule(); err != nil {
@@ -2183,7 +2226,7 @@ func (p *PackratParser) parseSetayBareKeyContinueChar(pos int) (*DefSetayBareKey
 	defer p.leaveRule()
 
 	startPos := pos
-	result := &DefSetayBareKeyContinueChar{}
+	result := &DefSetayUnquotedKeyContinueChar{}
 
 	// Field: AnonymousField1 (Choice)
 	{
@@ -2239,21 +2282,21 @@ func (p *PackratParser) parseSetayBareKeyContinueChar(pos int) (*DefSetayBareKey
 		}
 		if !choiceMatched {
 			err := fmt.Errorf("line %d: no choice matched for field AnonymousField1", p.lineAt(pos))
-			p.memoize("SetayBareKeyContinueChar", startPos, nil, pos, err)
+			p.memoize("SetayUnquotedKeyContinueChar", startPos, nil, pos, err)
 			return nil, pos, err
 		}
 	}
 	result.Authority = p.makeAuthority(startPos, pos)
-	p.memoize("SetayBareKeyContinueChar", startPos, result, pos, nil)
+	p.memoize("SetayUnquotedKeyContinueChar", startPos, result, pos, nil)
 	return result, pos, nil
 }
 
-func (p *PackratParser) parseSetayBareKeyTrailingChar(pos int) (*DefSetayBareKeyTrailingChar, int, error) {
-	if m, ok := p.getMemo("SetayBareKeyTrailingChar", pos); ok {
+func (p *PackratParser) parseSetayUnquotedKeyTrailingChar(pos int) (*DefSetayUnquotedKeyTrailingChar, int, error) {
+	if m, ok := p.getMemo("SetayUnquotedKeyTrailingChar", pos); ok {
 		if m.err != nil {
 			return nil, m.end, m.err
 		}
-		return m.node.(*DefSetayBareKeyTrailingChar), m.end, nil
+		return m.node.(*DefSetayUnquotedKeyTrailingChar), m.end, nil
 	}
 
 	if err := p.enterRule(); err != nil {
@@ -2262,7 +2305,7 @@ func (p *PackratParser) parseSetayBareKeyTrailingChar(pos int) (*DefSetayBareKey
 	defer p.leaveRule()
 
 	startPos := pos
-	result := &DefSetayBareKeyTrailingChar{}
+	result := &DefSetayUnquotedKeyTrailingChar{}
 
 	// Field: AnonymousField1 (Choice)
 	{
@@ -2304,12 +2347,12 @@ func (p *PackratParser) parseSetayBareKeyTrailingChar(pos int) (*DefSetayBareKey
 		}
 		if !choiceMatched {
 			err := fmt.Errorf("line %d: no choice matched for field AnonymousField1", p.lineAt(pos))
-			p.memoize("SetayBareKeyTrailingChar", startPos, nil, pos, err)
+			p.memoize("SetayUnquotedKeyTrailingChar", startPos, nil, pos, err)
 			return nil, pos, err
 		}
 	}
 	result.Authority = p.makeAuthority(startPos, pos)
-	p.memoize("SetayBareKeyTrailingChar", startPos, result, pos, nil)
+	p.memoize("SetayUnquotedKeyTrailingChar", startPos, result, pos, nil)
 	return result, pos, nil
 }
 
@@ -5585,9 +5628,9 @@ func (p *PackratParser) parseSetayVarName(pos int) (*DefSetayVarName, int, error
 	startPos := pos
 	result := &DefSetayVarName{}
 
-	// Field: FirstCh (Reference -> SetayBareKeyLeadChar)
+	// Field: FirstCh (Reference -> SetayUnquotedKeyLeadChar)
 	{
-		node, end, err := p.parseSetayBareKeyLeadChar(pos)
+		node, end, err := p.parseSetayUnquotedKeyLeadChar(pos)
 		if err != nil {
 			p.memoize("SetayVarName", startPos, nil, pos, err)
 			return nil, pos, err
@@ -5601,7 +5644,7 @@ func (p *PackratParser) parseSetayVarName(pos int) (*DefSetayVarName, int, error
 		for {
 			repCount++
 			if repCount > MaxRepeatCount { return nil, pos, ErrRepeatLimitExceeded }
-			node, end, err := p.parseSetayBareKeyTrailingPart(pos)
+			node, end, err := p.parseSetayUnquotedKeyTrailingPart(pos)
 			if err != nil { break }
 			if end == pos { break } // prevent zero-length match
 			result.Trailing = append(result.Trailing, node)

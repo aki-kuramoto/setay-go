@@ -27,7 +27,7 @@ setay 本体のパス記法 (Document の `Get`/`SetRaw` 等で使うアドレ�
 
 ## 記法の形 (決定済み)
 
-パスは `:/` で始まり、以降は `.` 区切りのセグメント列。各セグメントは bare key /
+パスは `:/` で始まり、以降は `.` 区切りのセグメント列。各セグメントは unquoted key /
 引用キー / 数値インデックスのいずれか。
 
 例 (実在の想定):
@@ -53,10 +53,10 @@ setay 本体のパス記法 (Document の `Get`/`SetRaw` 等で使うアドレ�
 - セグメントは `.` で区切る (`:/a.b.c`)。
 - **末尾区切り `:/a.` や空セグメント `:/a..b` は無意味 → 不正 (reject)**。
 
-### bare key = LenientIdentifier、それ以外は必ず引用
+### unquoted key = LenientIdentifier、それ以外は必ず引用
 
 - 裸で書けるキーは LenientIdentifier に一致するものだけ (先頭・末尾ハイフン不可、
-  中間ハイフン可)。setay.bp の `SetayBareKey` / boompaw.bp の `LenientIdentifier`。
+  中間ハイフン可)。setay.bp の `SetayUnquotedKey` / boompaw.bp の `LenientIdentifier`。
 - **LenientIdentifier に一致しない全てのキーは `"` か `'` で囲う**。
 - `/` や `:` を特別視しない。「LenientIdentifier か否か」だけで引用の要否が決まる
   (結果として `/` や `:` を含むキーは引用されるが、それは一般規則の帰結にすぎない)。

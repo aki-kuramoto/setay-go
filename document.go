@@ -65,8 +65,8 @@ func (d *Document) Field(key string) (*Node, bool) {
 // Get resolves a setay path from the document root and returns the value there.
 //
 // A path starts with ":/" (the root) and is then "."-separated segments. A
-// segment is a bare key (a LenientIdentifier: [A-Za-z_] then [A-Za-z0-9_-]*, no
-// leading or trailing hyphen), a quoted key (a setay string, ' or ", used for
+// segment is an unquoted key (a LenientIdentifier: [A-Za-z_] then [A-Za-z0-9_-]*,
+// no leading or trailing hyphen), a quoted key (a setay string, ' or ", used for
 // keys that are not bare identifiers; it does not interpolate), or a numeric
 // list index (a negative index counts from the end). Examples:
 // ":/servers.0.host", `:/"a.b".port`, ":/ports.-1", ":/'a${b}'". This is setay's
@@ -120,6 +120,9 @@ func (cs *ChangeSet) Len() int { return len(cs.edits) }
 func (cs *ChangeSet) SetRaw(n *Node, setayText string) error {
 	if err := cs.checkNode(n); err != nil {
 		return err
+	}
+	if n.flag {
+		return fmt.Errorf("setay: SetRaw on a flag entry is not supported")
 	}
 	start, length := n.Span()
 	return cs.addEdit(start, length, setayText)
@@ -184,7 +187,7 @@ func (d *Document) fieldOf(dict *DefSetayDict, key string) (*Node, bool) {
 	u := &unmarshaler{source: d.source}
 	for i, e := range dictEntries(dict) {
 		if u.extractKeyText(e.Key) == key {
-			return &Node{doc: d, value: e.Value, parentDict: dict, entry: e, index: i}, true
+			return &Node{doc: d, value: entryValue(e), parentDict: dict, entry: e, index: i, flag: entryIsFlag(e)}, true
 		}
 	}
 	return nil, false
@@ -205,23 +208,57 @@ type Node struct {
 	parentList *DefSetayList
 	index      int
 	rootDict   *DefSetayDict
+
+	// flag is true when this node is a flag entry: a dict entry written as a key
+	// alone, with "= value" omitted. It has no value node (value is nil) and
+	// denotes the boolean true.
+	flag bool
 }
 
-// Raw returns the value's original source text, exactly as written.
+// entryValue returns a dict entry's value node, or nil when the entry is a flag
+// entry (a value-less key that denotes the boolean true).
+func entryValue(e *DefSetayDictEntry) *DefSetayValue {
+	if len(e.Assign) == 0 {
+		return nil
+	}
+	return e.Assign[0].Value
+}
+
+// entryIsFlag reports whether a dict entry is a flag entry (a key alone, with
+// no "= value").
+func entryIsFlag(e *DefSetayDictEntry) bool {
+	return len(e.Assign) == 0
+}
+
+// Raw returns the value's original source text, exactly as written. A flag entry
+// (a value-less key) has no value text, so Raw returns "" even though the value
+// it denotes is the boolean true.
 func (n *Node) Raw() string {
+	if n.flag {
+		return ""
+	}
 	return n.value.GetAuthority().Surface
 }
 
 // Span returns the value's position in the original source: the starting rune
-// offset and its length in runes.
+// offset and its length in runes. For a flag entry (no value text) it reports a
+// zero-length point just after the key.
 func (n *Node) Span() (start, length int) {
+	if n.flag {
+		a := n.entry.Key.GetAuthority()
+		return int(a.StartedAt) + int(a.Length), 0
+	}
 	a := n.value.GetAuthority()
 	return int(a.StartedAt), int(a.Length)
 }
 
 // Kind reports the value's setay kind: one of "dict", "list", "set", "string",
-// "number", "bool", "null", "utcts", "varref", or "unknown".
+// "number", "bool", "null", "utcts", "varref", or "unknown". A flag entry
+// denotes the boolean true, so its Kind is "bool".
 func (n *Node) Kind() string {
+	if n.flag {
+		return "bool"
+	}
 	switch n.value.AnonymousField1.(type) {
 	case *DefSetayDict:
 		return "dict"
@@ -248,6 +285,9 @@ func (n *Node) Kind() string {
 
 // Field returns the value of the given key when this node is a dict.
 func (n *Node) Field(key string) (*Node, bool) {
+	if n.flag {
+		return nil, false
+	}
 	dict, ok := dictOf(n.value)
 	if !ok {
 		return nil, false
@@ -258,6 +298,9 @@ func (n *Node) Field(key string) (*Node, bool) {
 // Index returns the i-th element when this node is a list. A negative index
 // counts from the end (-1 is the last element).
 func (n *Node) Index(i int) (*Node, bool) {
+	if n.flag {
+		return nil, false
+	}
 	list, ok := listOf(n.value)
 	if !ok {
 		return nil, false
@@ -281,6 +324,11 @@ func (n *Node) Unmarshal(v interface{}) error {
 		return fmt.Errorf("setay: Unmarshal target must be a non-nil pointer")
 	}
 	u := &unmarshaler{source: n.doc.source}
+	if n.flag {
+		// A flag entry denotes true; into a bool (or interface) target this sets
+		// true, into any other type setBool reports an error.
+		return u.setBool(rv.Elem(), true)
+	}
 	return u.unmarshalValue(n.value, rv.Elem())
 }
 
@@ -344,7 +392,7 @@ func parsePath(path string) ([]pathStep, error) {
 	return steps, nil
 }
 
-// pathSegmentStep converts one path segment (a bare key, a quoted key, or a
+// pathSegmentStep converts one path segment (an unquoted key, a quoted key, or a
 // numeric index) into a pathStep.
 func pathSegmentStep(seg *setaypath.DefSetayPathSegment) (pathStep, error) {
 	switch v := seg.AnonymousField1.(type) {
@@ -354,7 +402,7 @@ func pathSegmentStep(seg *setaypath.DefSetayPathSegment) (pathStep, error) {
 			return pathStep{}, err
 		}
 		return pathStep{index: i}, nil
-	case *setaypath.DefSetayPathBareKey:
+	case *setaypath.DefSetayPathUnquotedKey:
 		return pathStep{isField: true, field: v.GetAuthority().Surface}, nil
 	case *setaypath.DefSetayPathQuotedKey:
 		return pathStep{isField: true, field: decodeQuotedKey(v)}, nil

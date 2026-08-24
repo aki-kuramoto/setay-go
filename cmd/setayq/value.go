@@ -82,7 +82,13 @@ func astDictToValue(dict *setay.DefSetayDict, src []rune) *Value {
 	entries := dict.Entries[0]
 	addEntry := func(entry *setay.DefSetayDictEntry) {
 		key := astKeyText(entry.Key, src)
-		val := astValueToValue(entry.Value, src)
+		var val *Value
+		if len(entry.Assign) == 0 {
+			// Flag entry (a key alone): denotes the boolean true.
+			val = &Value{kind: kindBool, boolVal: true}
+		} else {
+			val = astValueToValue(entry.Assign[0].Value, src)
+		}
 		if _, exists := v.dictVals[key]; !exists {
 			v.dictKeys = append(v.dictKeys, key)
 		}
@@ -98,7 +104,7 @@ func astDictToValue(dict *setay.DefSetayDict, src []rune) *Value {
 func astKeyText(key *setay.DefSetayDictKey, src []rune) string {
 	inner := key.AnonymousField1
 	switch v := inner.(type) {
-	case *setay.DefSetayBareKey:
+	case *setay.DefSetayUnquotedKey:
 		return textOf(v.GetAuthority(), src)
 	case *setay.DefSetayString:
 		s, _ := astStringValue(v, src)

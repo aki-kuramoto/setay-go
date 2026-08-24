@@ -1,0 +1,8 @@
+{
+	verbose;
+	debug = true;
+	retries = 3;
+	flags = { fast; slow = false };
+	# a trailing flag with no semicolon
+	last;
+}

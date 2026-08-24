@@ -167,14 +167,27 @@ func (u *unmarshaler) setStructField(entry *DefSetayDictEntry, target reflect.Va
 	}
 
 	fieldVal := target.Field(idx)
-	return u.unmarshalValue(entry.Value, fieldVal)
+	if entryIsFlag(entry) {
+		// A flag entry denotes true. Into a bool field it sets true; into a
+		// non-bool field setBool reports an error. (An absent key leaves the
+		// field at its zero value, i.e. false — so present/absent map to
+		// true/false without anything to do here for the absent case.)
+		return u.setBool(fieldVal, true)
+	}
+	return u.unmarshalValue(entryValue(entry), fieldVal)
 }
 
 func (u *unmarshaler) setMapEntry(entry *DefSetayDictEntry, target reflect.Value, valType reflect.Type) error {
 	keyText := u.extractKeyText(entry.Key)
 
 	val := reflect.New(valType).Elem()
-	if err := u.unmarshalValue(entry.Value, val); err != nil {
+	if entryIsFlag(entry) {
+		// A flag entry denotes true; into map[K]bool or map[K]any this sets true,
+		// into a map with another value type setBool reports an error.
+		if err := u.setBool(val, true); err != nil {
+			return err
+		}
+	} else if err := u.unmarshalValue(entryValue(entry), val); err != nil {
 		return err
 	}
 	target.SetMapIndex(reflect.ValueOf(keyText), val)
@@ -188,7 +201,7 @@ func (u *unmarshaler) setMapEntry(entry *DefSetayDictEntry, target reflect.Value
 func (u *unmarshaler) extractKeyText(key *DefSetayDictKey) string {
 	inner := key.AnonymousField1
 	switch v := inner.(type) {
-	case *DefSetayBareKey:
+	case *DefSetayUnquotedKey:
 		return u.textOf(v.GetAuthority())
 	case *DefSetayString:
 		// Ignore variable resolution errors in string keys — keys are ordinarily literals.

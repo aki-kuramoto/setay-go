@@ -11,8 +11,8 @@ func (d *Document) Root() *Node {
 
 // --- Rename ------------------------------------------------------------------
 
-// Rename replaces a dict entry's key with raw setay key text (a bare key or a
-// quoted string). n must be a dict entry (obtained by navigating into a dict).
+// Rename replaces a dict entry's key with raw setay key text (an unquoted key or
+// a quoted string). n must be a dict entry (obtained by navigating into a dict).
 func (cs *ChangeSet) Rename(n *Node, keyText string) error {
 	if err := cs.checkNode(n); err != nil {
 		return err
@@ -35,7 +35,7 @@ func (cs *ChangeSet) Delete(n *Node) error {
 	switch {
 	case n.entry != nil:
 		ks, _ := authSpan(n.entry.Key.GetAuthority())
-		_, ve := authSpan(n.entry.Value.GetAuthority())
+		ve := entryEnd(n.entry)
 		start, length := cs.doc.lineDeleteSpan(ks, ve, ';')
 		return cs.addEdit(start, length, "")
 	case n.parentList != nil:
@@ -94,7 +94,7 @@ func (cs *ChangeSet) AppendEntry(dict *Node, keyText, valueText string) error {
 	}
 	last := all[len(all)-1]
 	indent := cs.doc.leadingIndent(int(last.Key.GetAuthority().StartedAt))
-	_, ve := authSpan(last.Value.GetAuthority())
+	ve := entryEnd(last)
 	if !dictHasTrailingSep(d) {
 		if err := cs.addEdit(ve, 0, ";"); err != nil {
 			return err
@@ -175,6 +175,17 @@ func (cs *ChangeSet) PrependElem(list *Node, valueText string) error {
 
 func authSpan(a *Authority) (start, end int) {
 	return int(a.StartedAt), int(a.StartedAt) + int(a.Length)
+}
+
+// entryEnd returns the rune offset just past a dict entry: the end of its value,
+// or the end of its key when the entry is a flag entry (no value).
+func entryEnd(e *DefSetayDictEntry) int {
+	if v := entryValue(e); v != nil {
+		_, end := authSpan(v.GetAuthority())
+		return end
+	}
+	_, end := authSpan(e.Key.GetAuthority())
+	return end
 }
 
 // containerDelims returns the rune offset just after the opening delimiter and

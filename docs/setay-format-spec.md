@@ -89,7 +89,7 @@ Strings are enclosed in either double quotes `"..."` or single quotes `'...'`.
 - Dict entries are separated by `;` and list elements by `,`.
   - The trailing `;` or `,` after the last entry/element may be omitted.
 
-## Bare Keys
+## Unquoted Keys
 
 Dict keys may omit quotes if all of the following rules are satisfied:
 
@@ -102,6 +102,38 @@ Dict keys may omit quotes if all of the following rules are satisfied:
 > This matches the `LenientIdentifier` rule from boompaw.bp.
 
 Examples: `name`, `is-student`, `is_neet`, `Address`, `HEIGHT` can all be used without quotes.
+
+## Flag Entries
+
+A dict entry may be written as a key alone, with the `= value` part omitted. This
+is a **flag entry**, and it denotes the boolean value `true`:
+
+```setay
+{
+	verbose;          # flag entry — denotes true
+	retries = 3;
+	debug = true;     # the same value as a flag entry, spelled out
+}
+```
+
+A flag entry and `key = true` are two spellings of the same value. Flag entries
+are meant for DSL-like configurations where presence itself carries the meaning,
+e.g. `{ any-key; while-holding = "xfer"; }`.
+
+Mapping rules:
+
+- Into a struct `bool` field: a flag entry (or `= true`) sets `true`; an absent
+  key leaves the field `false`. (This is why the target must be `bool`: a
+  pointer/`null` cannot distinguish "unspecified" from "explicitly false".)
+- Into a map value type of `bool` or `any`: a flag entry yields `true`.
+- Into any other target type: an error.
+- The encoder is intentionally lossy in the reverse direction: a boolean `true`
+  is always written as `= true`, never collapsed to a flag entry. Round-trip
+  editing (the Document API) preserves whichever spelling the author used, in
+  both directions.
+
+> A flag entry (`{ key; }`) is **not** the same as the Set type (`{ key=; }`),
+> which is a separate value kind terminated by the atomic token `=;`.
 
 # 4. Comment Syntax
 
@@ -144,7 +176,7 @@ At unmarshal time, `${VAR_NAME}` expressions are replaced with a resolved value.
 
 ## 5.2 Variable Name Rules
 
-Variable names follow the same character rules as bare keys:
+Variable names follow the same character rules as unquoted keys:
 - First character: `[a-zA-Z_]`
 - Subsequent characters: `[a-zA-Z0-9_-]`
 - Last character: `[a-zA-Z0-9_]` (no trailing hyphen)

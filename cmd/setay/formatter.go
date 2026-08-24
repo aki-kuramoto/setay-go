@@ -76,21 +76,29 @@ func (f *formatter) formatDictEntriesMultiLine(dict *DefSetayDict, depth int) {
 	}
 }
 
-// formatDictEntry formats a single key = value entry.
+// formatDictEntry formats a single "key = value" entry, or a flag entry (a key
+// alone, no "= value").
 func (f *formatter) formatDictEntry(entry *DefSetayDictEntry, depth int) {
 	f.formatDictKey(entry.Key)
+	if len(entry.Assign) == 0 {
+		// Flag entry: emit the key alone. The author's choice is preserved in
+		// both directions -- a flag entry is never expanded to "key = true", and
+		// (elsewhere) "key = true" is never folded to a flag entry.
+		return
+	}
+	value := entry.Assign[0].Value
 	// A multi-line dict or list value goes on its own line beneath the key
 	// (Allman): "key =\n<indent>{" or "key =\n<indent>[". Everything else stays
 	// on the same line: "key = value".
-	if f.valueIsMultilineBlock(entry.Value) {
+	if f.valueIsMultilineBlock(value) {
 		f.out.WriteString(" =")
 	} else {
 		f.out.WriteString(" = ")
 	}
-	f.formatValue(entry.Value, depth)
+	f.formatValue(value, depth)
 }
 
-// formatDictKey outputs the key, preserving bare keys and quoted strings.
+// formatDictKey outputs the key, preserving unquoted keys and quoted strings.
 func (f *formatter) formatDictKey(key *DefSetayDictKey) {
 	f.out.WriteString(f.textOf(key.GetAuthority()))
 }

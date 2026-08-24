@@ -127,54 +127,68 @@ def SetayTrailingSemicolon
 	_: ';';
 };
 
-# A single dict entry: key = value
+# A single dict entry: "key = value", or a flag entry "key" (the "= value"
+# omitted). A flag entry denotes the boolean value true (present = true); it is
+# meant for DSL-like configs, e.g. { verbose; retries = 3; }. A flag entry and
+# "key = true" are two spellings of the same value; the formatter preserves the
+# author's choice in BOTH directions (it never expands "key" to "key = true"
+# and never folds "key = true" to "key").
 def SetayDictEntry
 {
 	key: SetayDictKey;
+	assign: zero-or-one<SetayDictEntryAssign>;
+};
+
+# The "= value" part of a dict entry. When it is absent the entry is a flag
+# entry (implicit true). Spacing around '=' is allowed.
+def SetayDictEntryAssign
+{
 	_: SetaySpacing;
 	_: '=';
 	_: SetaySpacing;
 	value: SetayValue;
 };
 
-# Dict key: bare key or string.
+# Dict key: unquoted key or string.
 def SetayDictKey
 {
-	_: SetayBareKey or SetayString;
+	_: SetayUnquotedKey or SetayString;
 };
 
 # ======================================================================
-#  Bare Key
+#  Unquoted Key
 # ======================================================================
 
-# First char: [a-zA-Z_], middle: [a-zA-Z0-9_-], last: [a-zA-Z0-9_] (no hyphen).
-# A single-character key consists of just the first character.
-def SetayBareKey
+# An unquoted key is a plain identifier used as a dict key without quotes (as
+# opposed to a quoted string key). First char: [a-zA-Z_], middle: [a-zA-Z0-9_-],
+# last: [a-zA-Z0-9_] (no hyphen). A single-character key consists of just the
+# first character.
+def SetayUnquotedKey
 {
-	firstCh: SetayBareKeyLeadChar;
-	trailing: zero-or-one<SetayBareKeyTrailingPart>;
+	firstCh: SetayUnquotedKeyLeadChar;
+	trailing: zero-or-one<SetayUnquotedKeyTrailingPart>;
 };
 
-def SetayBareKeyTrailingPart
+def SetayUnquotedKeyTrailingPart
 {
-	midChars: zero-or-more<SetayBareKeyContinueChar>;
-	lastCh: SetayBareKeyTrailingChar;
+	midChars: zero-or-more<SetayUnquotedKeyContinueChar>;
+	lastCh: SetayUnquotedKeyTrailingChar;
 };
 
 # Characters allowed at the start: [a-zA-Z_]
-def SetayBareKeyLeadChar
+def SetayUnquotedKeyLeadChar
 {
 	_: char-range<'a','z'> or char-range<'A','Z'> or '_';
 };
 
 # Characters allowed in the middle: [a-zA-Z0-9_-]
-def SetayBareKeyContinueChar
+def SetayUnquotedKeyContinueChar
 {
 	_: char-range<'a','z'> or char-range<'A','Z'> or char-range<'0','9'> or '_' or '-';
 };
 
 # Characters allowed at the end: [a-zA-Z0-9_] (no hyphen)
-def SetayBareKeyTrailingChar
+def SetayUnquotedKeyTrailingChar
 {
 	_: char-range<'a','z'> or char-range<'A','Z'> or char-range<'0','9'> or '_';
 };
@@ -572,12 +586,12 @@ def SetayVarExpr
 	fallback: zero-or-one<SetayVarFallback>;
 };
 
-# Variable name: same rules as a bare key.
+# Variable name: same rules as an unquoted key.
 # (Backtick syntax is NOT supported; use string interpolation instead.)
 def SetayVarName
 {
-	firstCh: SetayBareKeyLeadChar;
-	trailing: zero-or-one<SetayBareKeyTrailingPart>;
+	firstCh: SetayUnquotedKeyLeadChar;
+	trailing: zero-or-one<SetayUnquotedKeyTrailingPart>;
 };
 
 # Fallback chain: ?: value  (can nest recursively for chaining)
