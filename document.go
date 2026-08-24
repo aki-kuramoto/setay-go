@@ -40,7 +40,7 @@ type edit struct {
 func ParseDocument(src string) (*Document, error) {
 	root, err := Parse(src)
 	if err != nil {
-		return nil, err
+		return nil, improveParseError(src, err)
 	}
 	return &Document{source: []rune(src), root: root}, nil
 }

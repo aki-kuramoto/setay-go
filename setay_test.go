@@ -57,7 +57,7 @@ func TestMarshalBasic(t *testing.T) {
 	t.Logf("Marshal output:\n%s", out)
 
 	// Verify key aspects
-	if !strings.Contains(out, `name = "John"`) {
+	if !strings.Contains(out, `name = 'John'`) {
 		t.Error("missing name field")
 	}
 	if !strings.Contains(out, `age = 42`) {
@@ -72,7 +72,7 @@ func TestMarshalBasic(t *testing.T) {
 	if strings.Contains(out, "should not appear") {
 		t.Error("hidden field should not appear")
 	}
-	if !strings.Contains(out, `NoTag = "visible"`) {
+	if !strings.Contains(out, `NoTag = 'visible'`) {
 		t.Error("NoTag field should use field name as key")
 	}
 	if strings.Contains(out, "opt") {
@@ -129,7 +129,7 @@ func TestMarshalNested(t *testing.T) {
 	}
 	t.Logf("Nested output:\n%s", string(data))
 
-	if !strings.Contains(string(data), `host = "localhost"`) {
+	if !strings.Contains(string(data), `host = 'localhost'`) {
 		t.Error("missing nested host")
 	}
 }
@@ -925,7 +925,7 @@ func TestMarshalSetString(t *testing.T) {
 		t.Fatalf("Marshal error: %v", err)
 	}
 	s := string(data)
-	if !strings.Contains(s, `"go"=;`) && !strings.Contains(s, `"setay"=;`) {
+	if !strings.Contains(s, `'go'=;`) && !strings.Contains(s, `'setay'=;`) {
 		t.Errorf("Marshal output missing set entries:\n%s", s)
 	}
 }

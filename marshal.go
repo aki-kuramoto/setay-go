@@ -407,13 +407,19 @@ func isValidUnquotedKey(s string) bool {
 func isAlpha(c byte) bool { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') }
 func isDigit(c byte) bool { return c >= '0' && c <= '9' }
 
-// writeString writes a double-quoted string with proper escaping.
+// writeString writes a single-quoted setay string. SQ is setay's stable,
+// non-interpolating string form: only ' and \ (and control characters) are
+// escaped, and every other byte -- including " $ { } -- is written literally.
+// This is why Marshal uses it: a double-quoted string would have to either write
+// $ { } bare (invalid, since DQ reserves them for interpolation) or escape every
+// symbol defensively (bare symbols may gain meaning in a future version). SQ has
+// neither problem, and it round-trips values that literally contain ${...}.
 func (m *marshaler) writeString(s string) {
-	m.out.WriteByte('"')
+	m.out.WriteByte('\'')
 	for _, r := range s {
 		switch r {
-		case '"':
-			m.out.WriteString(`\"`)
+		case '\'':
+			m.out.WriteString(`\'`)
 		case '\\':
 			m.out.WriteString(`\\`)
 		case '\n':
@@ -432,7 +438,7 @@ func (m *marshaler) writeString(s string) {
 			}
 		}
 	}
-	m.out.WriteByte('"')
+	m.out.WriteByte('\'')
 }
 
 func (m *marshaler) writeIndent(depth int) {

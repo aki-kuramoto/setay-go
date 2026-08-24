@@ -403,8 +403,12 @@ A `map[K]struct{}` **cannot** appear as the top-level document (the top level mu
 | `\uXXXX` | Unicode code point, exactly 4 hex digits (BMP) |
 | `\UXXXXXXXX` | Unicode code point, exactly 8 hex digits |
 
-> Surrogate code points (`\uD800`–`\uDFFF`) are not valid on their own; use `\U`
-> for code points beyond the BMP.
+> A `\u` or `\U` escape must resolve to a valid Unicode scalar value. As in
+> UTF-16 / JSON, a `\u` high surrogate (`\uD800`–`\uDBFF`) combines with an
+> immediately following `\u` low surrogate (`\uDC00`–`\uDFFF`) into one code
+> point — e.g. `\uD83D`+`\uDE00` is U+1F600 (also writable directly as `\U0001F600`).
+> A surrogate that is not part of such a pair — a lone or mis-ordered one, or a `\U`
+> naming a surrogate — is an error, as is any value above `U+10FFFF`.
 
 ## Double-quoted vs single-quoted
 
@@ -427,10 +431,13 @@ a "raw" string — escapes still work; there are simply fewer that are required.
 
 ## Stability guarantee
 
-The meaning of an escaped ASCII symbol (`\<symbol>` = that symbol) is guaranteed
-not to change. A *bare* ASCII symbol, on the other hand, may gain a special
-meaning in a future version (a breaking change). If in doubt, escape the symbol
-and its literal meaning is preserved.
+An escaped ASCII symbol (`\<symbol>` = that symbol) keeps its meaning forever.
+A *bare* symbol inside a **double-quoted** string may gain a special meaning in a
+future version (a breaking change) — double-quoted strings are the evolving,
+interpolating form. **Single-quoted strings are the stable form:** only `'` and
+`\` are ever special there, now and in every future version. For that reason the
+encoder (`Marshal`) always writes single-quoted strings, so its output stays
+readable across versions.
 
 ---
 
@@ -816,8 +823,11 @@ message = "Hello, ${NAME ?: 'stranger'}! Port is ${PORT ?: 8080}.";
 | `\uXXXX` | Unicode コードポイント, 16進 4 桁 (BMP) |
 | `\UXXXXXXXX` | Unicode コードポイント, 16進 8 桁 |
 
-> サロゲートコードポイント (`\uD800`-`\uDFFF`) は単体では有効ではありません。
-> BMP 外は `\U` を使ってください。
+> `\u` / `\U` エスケープは有効な Unicode スカラー値に解決される必要があります。
+> UTF-16 / JSON と同様、`\u` の上位サロゲート (`\uD800`-`\uDBFF`) は直後に続く `\u` の
+> 下位サロゲート (`\uDC00`-`\uDFFF`) と結合して 1 つのコードポイントになります
+> (例: `\uD83D`+`\uDE00` は U+1F600; `\U0001F600` とも書けます)。ペアを成さない
+> (孤立・順序違いの) サロゲート、`\U` によるサロゲート、`U+10FFFF` 超過はエラーです。
 
 ## ダブルクォートとシングルクォート
 
@@ -840,6 +850,8 @@ message = "Hello, ${NAME ?: 'stranger'}! Port is ${PORT ?: 8080}.";
 
 ## 安定性保証
 
-エスケープした ASCII 記号の意味 (`\<記号>` = その記号) は将来も変わりません。一方、
-**素の** ASCII 記号は将来のバージョンで special な意味を得る可能性があります (破壊的
-変更)。不安なら記号をエスケープしておけば、そのリテラルの意味は保証されます。
+エスケープした ASCII 記号 (`\<記号>` = その記号) の意味は将来も変わりません。**ダブル
+クォート**文字列内の**素の**記号は、将来のバージョンで special な意味を得る可能性があります
+(破壊的変更) — DQ は進化する・補間する側だからです。**シングルクォート文字列は安定側**
+で、特別なのは `'` と `\` だけ、現在も将来も変わりません。そのためエンコーダ (`Marshal`) は
+常にシングルクォート文字列を出力し、出力が将来バージョンでも読めるようにします。

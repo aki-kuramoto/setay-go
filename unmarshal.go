@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf16"
 )
 
 // Unmarshal parses setay-encoded data and stores the result in the value pointed
@@ -27,7 +28,7 @@ func Unmarshal(data []byte, v interface{}, opts ...UnmarshalOption) error {
 	source := string(data)
 	doc, err := Parse(source)
 	if err != nil {
-		return fmt.Errorf("setay: %w", err)
+		return fmt.Errorf("setay: %w", improveParseError(source, err))
 	}
 
 	// Verify all input consumed
@@ -563,14 +564,15 @@ func (u *unmarshaler) setWantaiTs(t time.Time, target reflect.Value) error {
 }
 
 // decodeString extracts the unescaped string content from a SetayString node.
-// An error is returned only when variable resolution inside a DQ string fails.
+// An error is returned when variable resolution inside a DQ string fails, or when
+// a \u / \U escape names an invalid Unicode code point.
 func (u *unmarshaler) decodeString(str *DefSetayString) (string, error) {
 	inner := str.AnonymousField1
 	switch v := inner.(type) {
 	case *DefSetayDqString:
 		return u.decodeStringContent(v.Content)
 	case *DefSetaySqString:
-		return u.decodeSqStringContent(v.Content), nil
+		return u.decodeSqStringContent(v.Content)
 	default:
 		// Fallback: strip quotes from raw text
 		raw := u.textOf(str.GetAuthority())
@@ -583,9 +585,15 @@ func (u *unmarshaler) decodeString(str *DefSetayString) (string, error) {
 
 func (u *unmarshaler) decodeStringContent(contents []*DefSetayDqStringContent) (string, error) {
 	var sb strings.Builder
-	for _, c := range contents {
-		inner := c.AnonymousField1
-		switch v := inner.(type) {
+	nextEsc := func(j int) (*DefSetayEscapeSequence, bool) {
+		if j < 0 || j >= len(contents) {
+			return nil, false
+		}
+		e, ok := contents[j].AnonymousField1.(*DefSetayEscapeSequence)
+		return e, ok
+	}
+	for i := 0; i < len(contents); i++ {
+		switch v := contents[i].AnonymousField1.(type) {
 		case *DefSetayVarRef:
 			// Variable interpolation inside a DQ string — errors propagate to the caller.
 			resolved, err := u.resolveVarRef(v)
@@ -594,39 +602,92 @@ func (u *unmarshaler) decodeStringContent(contents []*DefSetayDqStringContent) (
 			}
 			sb.WriteString(resolved)
 		case *DefSetayEscapeSequence:
-			sb.WriteString(u.decodeEscape(v))
+			extra, err := u.writeEscapeSeq(&sb, v, i, nextEsc)
+			if err != nil {
+				return "", err
+			}
+			i += extra
 		case *DefSetayDqNormalChar:
 			sb.WriteString(u.textOf(v.GetAuthority()))
 		default:
-			sb.WriteString(u.textOf(c.GetAuthority()))
+			sb.WriteString(u.textOf(contents[i].GetAuthority()))
 		}
 	}
 	return sb.String(), nil
 }
 
-func (u *unmarshaler) decodeSqStringContent(contents []*DefSetaySqStringContent) string {
+func (u *unmarshaler) decodeSqStringContent(contents []*DefSetaySqStringContent) (string, error) {
 	var sb strings.Builder
-	for _, c := range contents {
-		inner := c.AnonymousField1
-		switch v := inner.(type) {
+	nextEsc := func(j int) (*DefSetayEscapeSequence, bool) {
+		if j < 0 || j >= len(contents) {
+			return nil, false
+		}
+		e, ok := contents[j].AnonymousField1.(*DefSetayEscapeSequence)
+		return e, ok
+	}
+	for i := 0; i < len(contents); i++ {
+		switch v := contents[i].AnonymousField1.(type) {
 		case *DefSetayEscapeSequence:
-			sb.WriteString(u.decodeEscape(v))
+			extra, err := u.writeEscapeSeq(&sb, v, i, nextEsc)
+			if err != nil {
+				return "", err
+			}
+			i += extra
 		case *DefSetaySqNormalChar:
 			sb.WriteString(u.textOf(v.GetAuthority()))
 		default:
-			sb.WriteString(u.textOf(c.GetAuthority()))
+			sb.WriteString(u.textOf(contents[i].GetAuthority()))
 		}
 	}
-	return sb.String()
+	return sb.String(), nil
 }
 
-func (u *unmarshaler) decodeEscape(esc *DefSetayEscapeSequence) string {
-	escText := u.textOf(esc.GetAuthority())
-	if len(escText) < 2 {
-		return escText
+// writeEscapeSeq decodes the escape at index i into sb. For a \u high surrogate
+// it combines with an immediately following \u low surrogate into one code point
+// (UTF-16 style — accepted for interoperability with data from UTF-16-era
+// systems, e.g. JSON). It returns how many *following* content items it also
+// consumed (0, or 1 when a pair was combined). nextEsc returns the escape node
+// at index j when the content item there is an escape sequence.
+func (u *unmarshaler) writeEscapeSeq(sb *strings.Builder, seq *DefSetayEscapeSequence, i int, nextEsc func(j int) (*DefSetayEscapeSequence, bool)) (extra int, err error) {
+	n, form, isUni := u.unicodeEscapeValue(seq)
+	if !isUni {
+		sb.WriteString(u.decodeSimpleEscape(seq))
+		return 0, nil
 	}
-	ch := escText[1]
-	switch ch {
+	// \U names a scalar value directly; it never participates in a pair.
+	if form == 'U' {
+		if n < 0 || n > maxRune || isSurrogate(n) {
+			return 0, u.invalidCodePoint(seq, n)
+		}
+		sb.WriteRune(rune(n))
+		return 0, nil
+	}
+	// form == 'u' (0x0000-0xFFFF).
+	if isHighSurrogate(n) {
+		if lo, ok := nextEsc(i + 1); ok {
+			if ln, lform, lok := u.unicodeEscapeValue(lo); lok && lform == 'u' && isLowSurrogate(ln) {
+				sb.WriteRune(utf16.DecodeRune(rune(n), rune(ln)))
+				return 1, nil
+			}
+		}
+		return 0, u.unpairedSurrogate(seq, n)
+	}
+	if isLowSurrogate(n) {
+		return 0, u.unpairedSurrogate(seq, n)
+	}
+	sb.WriteRune(rune(n))
+	return 0, nil
+}
+
+// decodeSimpleEscape decodes an escape that is not \u / \U: a control escape
+// (\n \r \t \0), \xHH (always 0x00-0x7F, a valid code point), or '\' + an ASCII
+// symbol (which yields the symbol itself).
+func (u *unmarshaler) decodeSimpleEscape(esc *DefSetayEscapeSequence) string {
+	t := u.textOf(esc.GetAuthority())
+	if len(t) < 2 {
+		return t
+	}
+	switch t[1] {
 	case 't':
 		return "\t"
 	case 'r':
@@ -635,34 +696,44 @@ func (u *unmarshaler) decodeEscape(esc *DefSetayEscapeSequence) string {
 		return "\n"
 	case '0':
 		return "\x00"
-	case '\\':
-		return "\\"
-	case '"':
-		return "\""
-	case '\'':
-		return "'"
 	case 'x':
-		// ParseInt cannot fail here: the PEG grammar requires exactly 2 hex digits.
-		if len(escText) == 4 {
-			n, _ := strconv.ParseInt(escText[2:4], 16, 32)
-			return string(rune(n))
-		}
-	case 'u':
-		// ParseInt cannot fail here: the PEG grammar requires exactly 4 hex digits.
-		if len(escText) == 6 {
-			n, _ := strconv.ParseInt(escText[2:6], 16, 32)
-			return string(rune(n))
-		}
-	case 'U':
-		// ParseInt cannot fail here: the PEG grammar requires exactly 8 hex digits.
-		if len(escText) == 10 {
-			n, _ := strconv.ParseInt(escText[2:10], 16, 32)
+		// ParseInt cannot fail: the grammar requires exactly 2 hex digits, 0x00-0x7F.
+		if len(t) == 4 {
+			n, _ := strconv.ParseInt(t[2:4], 16, 32)
 			return string(rune(n))
 		}
 	}
-	// Any other escape is '\' + a single ASCII symbol (the grammar guarantees no
-	// unknown letter/digit escape reaches here): yield the symbol itself.
-	return escText[1:]
+	// '\' + a single ASCII symbol (covers \\ \" \' and every other symbol).
+	return t[1:]
+}
+
+// unicodeEscapeValue reports whether esc is a \uXXXX or \UXXXXXXXX escape and, if
+// so, its raw numeric code-point value and the form ('u' or 'U').
+func (u *unmarshaler) unicodeEscapeValue(esc *DefSetayEscapeSequence) (n int64, form byte, ok bool) {
+	t := u.textOf(esc.GetAuthority())
+	switch {
+	case len(t) == 6 && t[1] == 'u':
+		n, _ = strconv.ParseInt(t[2:6], 16, 32)
+		return n, 'u', true
+	case len(t) == 10 && t[1] == 'U':
+		n, _ = strconv.ParseInt(t[2:10], 16, 64)
+		return n, 'U', true
+	}
+	return 0, 0, false
+}
+
+const maxRune = 0x10FFFF
+
+func isHighSurrogate(n int64) bool { return n >= 0xD800 && n <= 0xDBFF }
+func isLowSurrogate(n int64) bool  { return n >= 0xDC00 && n <= 0xDFFF }
+func isSurrogate(n int64) bool     { return n >= 0xD800 && n <= 0xDFFF }
+
+func (u *unmarshaler) invalidCodePoint(esc *DefSetayEscapeSequence, n int64) error {
+	return fmt.Errorf("setay: invalid Unicode code point in escape \"%s\": U+%04X is not a valid scalar value (a surrogate, or beyond U+10FFFF)", u.textOf(esc.GetAuthority()), n)
+}
+
+func (u *unmarshaler) unpairedSurrogate(esc *DefSetayEscapeSequence, n int64) error {
+	return fmt.Errorf("setay: unpaired UTF-16 surrogate in escape \"%s\": U+%04X — a \\uD800-\\uDBFF high surrogate must be immediately followed by a \\uDC00-\\uDFFF low surrogate (or use \\U for the code point)", u.textOf(esc.GetAuthority()), n)
 }
 
 // unmarshalSet populates a map[K]struct{} from a SetaySet node.

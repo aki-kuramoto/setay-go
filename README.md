@@ -73,13 +73,13 @@ func main() {
 }
 ```
 
-Output:
+Output (`Marshal` writes single-quoted strings — setay's stable, non-interpolating string form):
 
 ```setay
 {
-	name = "my-app";
+	name = 'my-app';
 	port = 8080;
-	tags = [ "web", "api" ];
+	tags = [ 'web', 'api' ];
 }
 ```
 
@@ -455,13 +455,13 @@ func main() {
 }
 ```
 
-出力：
+出力 (`Marshal` はシングルクォート文字列を出力する -- setay の安定・非補間の文字列形式)：
 
 ```setay
 {
-	name = "my-app";
+	name = 'my-app';
 	port = 8080;
-	tags = [ "web", "api" ];
+	tags = [ 'web', 'api' ];
 }
 ```
 
