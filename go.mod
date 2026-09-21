@@ -1,5 +1,5 @@
 module github.com/aki-kuramoto/setay-go
 
-go 1.25.5
+go 1.21
 
 require github.com/aki-kuramoto/wantai v0.2.0
