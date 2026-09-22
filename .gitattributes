@@ -1,0 +1,21 @@
+# Line endings are decided here rather than by each machine's git configuration.
+# A .gitattributes entry outranks core.autocrlf and core.eol, so the rule
+# travels with the repository instead of depending on who cloned it.
+#
+#   text    normalise to LF on the way in, whatever the working tree held.
+#   eol=lf  on the way out, write what the index holds. Git only ever adds CR
+#           (for eol=crlf) and never strips it, so a blob that predates this
+#           rule keeps the endings it was committed with.
+#
+# LF is also what the format asks for in stored files: "The standard character
+# encoding is UTF-8 without BOM, with LF line endings." A parser still accepts
+# CRLF and a lone CR — this is about what the repository holds, not about what
+# setay can read.
+* text=auto eol=lf
+
+# cmd.exe walks a batch file by byte offset and can lose a label or cut a block
+# short when the endings are LF alone, so these are written out with CRLF and
+# the shell reading them gets what it expects. Neither extension appears in the
+# tree today; the rule is here so that the first one added is already covered.
+*.bat text eol=crlf
+*.cmd text eol=crlf
